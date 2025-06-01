@@ -8,7 +8,7 @@ const { performanceMonitor } = require('./performanceMonitor');
 const path = require('path');
 const fs = require('fs');
 const { getDirectVideoIdMatch } = require('./sourceFetcher');
-const axios = require('axios');
+const fetch = require('node-fetch');
 
 const activeProcesses = new Map();
 const MAX_CONCURRENT_PROCESSES = 3;
@@ -656,17 +656,15 @@ async function createDirectHttpStream(streamUrl) {
   console.log('[DEBUG] Creating direct HTTP stream from URL');
   
   try {
-    const response = await axios({
+    const response = await fetch(streamUrl, {
       method: 'GET',
-      url: streamUrl,
-      responseType: 'stream',
-      timeout: 30000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
+      },
+      timeout: 30000
     });
     
-    const { stream, type } = await demuxProbe(response.data);
+    const { stream, type } = await demuxProbe(response.body);
     console.log('[DEBUG] Direct HTTP stream created successfully');
     return { stream, type };
   } catch (error) {

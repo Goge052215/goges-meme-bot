@@ -14,7 +14,7 @@ const youtubeDl = require('youtube-dl-exec');
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
-const axios = require('axios').default;
+const fetch = require('node-fetch');
 
 const sleep = util.promisify(setTimeout);
 
