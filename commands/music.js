@@ -5,6 +5,11 @@ const { ActionRowBuilder, StringSelectMenuBuilder, ComponentType } = require('di
 
 const {
   isSpotifyUrl,
+  isUserAuthenticated,
+  getUserCurrentPlayback,
+  controlUserPlayback,
+  getUserDevices,
+  addToUserQueue
 } = require('../media/spotifyUtils');
 const { queues, getQueue } = require('../media/queueManager');
 const {
@@ -27,43 +32,39 @@ const {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('music')
-    .setDescription('🎵 Spotify-focused music commands')
+    .setDescription('🎵 Music commands with Spotify integration')
     .addSubcommand(subcommand =>
       subcommand
         .setName('play')
-        .setDescription('🎵 Search and play music on Spotify or add to queue')
+        .setDescription('🎵 Search and play music from multiple sources')
         .addStringOption(option =>
           option.setName('query')
-            .setDescription('Song name, artist, or Spotify URL')
+            .setDescription('Song name, artist, or URL (Spotify, YouTube, SoundCloud)')
             .setRequired(true))
         .addBooleanOption(option =>
-          option.setName('queue')
-            .setDescription('Add to Spotify queue instead of playing immediately')
+          option.setName('spotify_queue')
+            .setDescription('Add to your personal Spotify queue (requires /spotify login)')
             .setRequired(false)))
     .addSubcommand(subcommand =>
       subcommand
         .setName('current')
-        .setDescription('🎵 Show what\'s currently playing on Spotify'))
+        .setDescription('🎵 Show what\'s currently playing (Discord bot or Spotify)'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('pause')
-        .setDescription('⏸️ Pause Spotify playback'))
+        .setDescription('⏸️ Pause current playback (Discord bot)'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('resume')
-        .setDescription('▶️ Resume Spotify playback'))
+        .setDescription('▶️ Resume current playback (Discord bot)'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('skip')
-        .setDescription('⏭️ Skip to next track on Spotify'))
+        .setDescription('⏭️ Skip to next track (Discord bot)'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('previous')
-        .setDescription('⏮️ Go to previous track on Spotify'))
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('devices')
-        .setDescription('📱 Show available Spotify devices'))
+        .setDescription('⏮️ Go to previous track (Discord bot)'))
     .addSubcommand(subcommand =>
       subcommand
         .setName('search')
@@ -73,8 +74,8 @@ module.exports = {
             .setDescription('Song name, artist, or keywords')
             .setRequired(true))
         .addBooleanOption(option =>
-          option.setName('queue')
-            .setDescription('Add selected song to queue instead of playing immediately')
+          option.setName('spotify_queue')
+            .setDescription('Add selected song to your Spotify queue instead')
             .setRequired(false))),
         
   async execute(interaction) {
@@ -83,6 +84,8 @@ module.exports = {
     queue.textChannel = channel;
 
     const subcommand = options.getSubcommand();
+    const userId = interaction.user.id;
+    const userHasSpotify = isUserAuthenticated(userId);
 
     if (!member.voice.channel && ['play', 'stop', 'skip', 'loop'].includes(subcommand)) {
       return interaction.reply({ 
@@ -95,7 +98,13 @@ module.exports = {
       await interaction.deferReply({ ephemeral: true });
       try {
         if (!queue.songs.length) {
-          return interaction.editReply('The queue is empty!');
+          let queueMessage = 'The Discord queue is empty!';
+          if (userHasSpotify) {
+            queueMessage += '\n\n💡 **Tip:** You can also check your Spotify queue using `/spotify status`';
+          } else {
+            queueMessage += '\n\n💡 **Tip:** Use `/spotify login` to connect your account and access your personal Spotify queue!';
+          }
+          return interaction.editReply(queueMessage);
         }
         const current = queue.songs[0];
         const upcoming = queue.songs.slice(1);
@@ -109,6 +118,13 @@ module.exports = {
         } else {
           queueString += upcoming.map((song, index) => `${index + 1}. ${song.title} (${song.source})`).join('\n');
         }
+        
+        if (userHasSpotify) {
+          queueString += '\n\n💡 **Tip:** Use `/spotify status` to see your personal Spotify playback';
+        } else {
+          queueString += '\n\n💡 **Tip:** Use `/spotify login` to access enhanced Spotify features!';
+        }
+        
         return interaction.editReply(queueString);
       } catch (err) {
         console.error('Error in queue command:', err);
@@ -158,9 +174,6 @@ module.exports = {
         case 'previous':
           await handlePrevious(interaction);
           break;
-        case 'devices':
-          await handleDevices(interaction);
-          break;
         case 'search':
           await handleSearch(interaction);
           break;
@@ -191,28 +204,44 @@ module.exports = {
 
 async function handlePlay(interaction) {
   const query = interaction.options.getString('query');
-  const addToQueue = interaction.options.getBoolean('queue') || false;
+  const addToSpotifyQueue = interaction.options.getBoolean('spotify_queue') || false;
+  const userId = interaction.user.id;
+  const userHasSpotify = isUserAuthenticated(userId);
   
   await interaction.deferReply();
   
-  console.log(`🎵 Music search request: "${query}" (${addToQueue ? 'queue' : 'play'})`);
+  console.log(`🎵 Music search request: "${query}" (${addToSpotifyQueue ? 'spotify queue' : 'discord play'})`);
+  
+  // Check if user wants to add to Spotify queue but isn't authenticated
+  if (addToSpotifyQueue && !userHasSpotify) {
+    return interaction.editReply({
+      content: '🔐 **Authentication Required**\n\nTo add songs to your Spotify queue, you need to connect your account first.\n\n**Steps:**\n1. Use `/spotify login` to connect your account\n2. Complete the authentication process\n3. Try this command again with the `spotify_queue` option\n\n**Alternative:** Remove the `spotify_queue` option to play through Discord instead.\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for step-by-step instructions.'
+    });
+  }
   
   try {
+    // If adding to Spotify queue, handle that separately
+    if (addToSpotifyQueue && userHasSpotify) {
+      return await handleSpotifyQueueAdd(interaction, query, userId);
+    }
+
+    // Regular Discord playback
     const searchResults = await aggregateMusicSearch(query, {
+      sources: ['spotify', 'soundcloud'],
       maxResults: 5,
-      sourceTimeout: 20000
+      timeout: 15000
     });
-    
-    if (!searchResults || searchResults.length === 0) {
-      await interaction.editReply({
-        content: `❌ No results found for "${query}". Try a different search term.`,
-        ephemeral: true
-      });
-      return;
+
+    if (!searchResults || searchResults.length === 0 || searchResults[0].isError) {
+      let errorMessage = '❌ No results found for your search.';
+      if (!userHasSpotify) {
+        errorMessage += '\n\n💡 **Tip:** Connect your Spotify account with `/spotify login` for access to enhanced features and your personal music!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for step-by-step instructions.';
+      }
+      return interaction.editReply(errorMessage);
     }
 
     if (searchResults.length > 1) {
-      await showSearchResults(interaction, searchResults, query, addToQueue);
+      await showSearchResults(interaction, searchResults, query, addToSpotifyQueue);
       return;
     }
     
@@ -231,7 +260,7 @@ async function handlePlay(interaction) {
       
       // Handle Spotify sources with URIs
       if (firstResult.spotifyUri) {
-        if (addToQueue) {
+        if (addToSpotifyQueue) {
           success = await firstResult.addToSpotifyQueue();
           if (success) {
             const embed = new EmbedBuilder()
@@ -272,7 +301,7 @@ async function handlePlay(interaction) {
         const { guildId, member } = interaction;
         const queue = getQueue(guildId);
         
-        if (addToQueue) {
+        if (addToSpotifyQueue) {
           queue.songs.push({
             title: firstResult.title,
             webpageUrl: firstResult.webpageUrl,
@@ -333,7 +362,7 @@ async function handlePlay(interaction) {
       
       if (!success) {
         await interaction.editReply({
-          content: `❌ Failed to ${addToQueue ? 'add to queue' : 'play'} "${firstResult.title}". ${firstResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
+          content: `❌ Failed to ${addToSpotifyQueue ? 'add to queue' : 'play'} "${firstResult.title}". ${firstResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
           ephemeral: true
         });
         return;
@@ -367,7 +396,7 @@ async function handlePlay(interaction) {
   }
 }
 
-async function showSearchResults(interaction, searchResults, query, addToQueue) {
+async function showSearchResults(interaction, searchResults, query, addToSpotifyQueue) {
   const options = searchResults.slice(0, 10).map((result, index) => {
     const statusIcon = result.spotifyUri ? '🎵' : '🔊';
     const sourceIcon = result.source === 'Spotify' ? '🎵' : 
@@ -392,7 +421,7 @@ async function showSearchResults(interaction, searchResults, query, addToQueue) 
   const embed = new EmbedBuilder()
     .setColor(0x1DB954)
     .setTitle('🎵 Search Results')
-    .setDescription(`Found ${searchResults.length} results for **"${query}"**\n\nSelect a song to ${addToQueue ? 'add to queue' : 'play'}:`)
+    .setDescription(`Found ${searchResults.length} results for **"${query}"**\n\nSelect a song to ${addToSpotifyQueue ? 'add to queue' : 'play'}:`)
     .setFooter({ text: 'Selection expires in 60 seconds' });
 
   searchResults.slice(0, 5).forEach((result, index) => {
@@ -423,7 +452,7 @@ async function showSearchResults(interaction, searchResults, query, addToQueue) 
 
       await selectInteraction.deferUpdate();
       
-      await playSelectedSong(interaction, selectedResult, addToQueue);
+      await playSelectedSong(interaction, selectedResult, addToSpotifyQueue);
       
       const selectedEmbed = new EmbedBuilder()
         .setColor(0x1DB954)
@@ -432,7 +461,7 @@ async function showSearchResults(interaction, searchResults, query, addToQueue) 
         .addFields(
           { name: '🎵 Source', value: selectedResult.source, inline: true },
           { name: '⏱️ Duration', value: selectedResult.duration || formatDuration(selectedResult.durationSeconds), inline: true },
-          { name: '🎯 Action', value: addToQueue ? 'Added to queue' : 'Now playing', inline: true }
+          { name: '🎯 Action', value: addToSpotifyQueue ? 'Added to queue' : 'Now playing', inline: true }
         )
         .setThumbnail(selectedResult.thumbnail);
 
@@ -465,7 +494,7 @@ async function showSearchResults(interaction, searchResults, query, addToQueue) 
   }
 }
 
-async function playSelectedSong(interaction, selectedResult, addToQueue) {
+async function playSelectedSong(interaction, selectedResult, addToSpotifyQueue) {
   if (selectedResult.isError) {
     await interaction.followUp({
       content: selectedResult.errorMessage,
@@ -478,7 +507,7 @@ async function playSelectedSong(interaction, selectedResult, addToQueue) {
     let success = false;
     
     if (selectedResult.spotifyUri) {
-      if (addToQueue) {
+      if (addToSpotifyQueue) {
         success = await selectedResult.addToSpotifyQueue();
       } else {
         success = await selectedResult.playOnSpotify();
@@ -490,7 +519,7 @@ async function playSelectedSong(interaction, selectedResult, addToQueue) {
       const { guildId, member } = interaction;
       const queue = getQueue(guildId);
       
-      if (addToQueue) {
+      if (addToSpotifyQueue) {
         queue.songs.push({
           title: selectedResult.title,
           webpageUrl: selectedResult.webpageUrl,
@@ -522,7 +551,7 @@ async function playSelectedSong(interaction, selectedResult, addToQueue) {
     
     if (!success) {
       await interaction.followUp({
-        content: `❌ Failed to ${addToQueue ? 'add to queue' : 'play'} "${selectedResult.title}". ${selectedResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
+        content: `❌ Failed to ${addToSpotifyQueue ? 'add to queue' : 'play'} "${selectedResult.title}". ${selectedResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
         ephemeral: true
       });
     }
@@ -531,23 +560,24 @@ async function playSelectedSong(interaction, selectedResult, addToQueue) {
 
 async function handleSearch(interaction) {
   const query = interaction.options.getString('query');
-  const addToQueue = interaction.options.getBoolean('queue') || false;
+  const addToSpotifyQueue = interaction.options.getBoolean('spotify_queue') || false;
   
-  if (!interaction.member.voice.channel && !addToQueue) {
+  if (!interaction.member.voice.channel && !addToSpotifyQueue) {
     return interaction.reply({ 
-      content: 'You need to be in a voice channel to play music! Use `queue: true` to add to Spotify queue instead.', 
+      content: 'You need to be in a voice channel to play music! Use `spotify_queue: true` to add to Spotify queue instead.', 
       ephemeral: true 
     });
   }
   
   await interaction.deferReply();
   
-  console.log(`🔍 Explicit search request: "${query}" (${addToQueue ? 'queue' : 'play'})`);
+  console.log(`🔍 Explicit search request: "${query}" (${addToSpotifyQueue ? 'spotify queue' : 'discord play'})`);
   
   try {
     const searchResults = await aggregateMusicSearch(query, {
+      sources: ['spotify', 'soundcloud'],
       maxResults: 10,
-      sourceTimeout: 20000
+      timeout: 20000
     });
     
     if (!searchResults || searchResults.length === 0) {
@@ -559,7 +589,7 @@ async function handleSearch(interaction) {
     }
 
     // Always show selection menu for search command
-    await showSearchResults(interaction, searchResults, query, addToQueue);
+    await showSearchResults(interaction, searchResults, query, addToSpotifyQueue);
     
   } catch (error) {
     console.error('Search command error:', error);
@@ -571,43 +601,89 @@ async function handleSearch(interaction) {
 }
 
 async function handleCurrent(interaction) {
-  await interaction.deferReply();
+  const userId = interaction.user.id;
+  const userHasSpotify = isUserAuthenticated(userId);
   
+  await interaction.deferReply({ ephemeral: true });
+
   try {
-    const currentTrack = await getCurrentlyPlayingTrack();
+    const guildId = interaction.guildId;
+    const queue = getQueue(guildId);
     
-    if (!currentTrack) {
-      await interaction.editReply({
-        content: '📱 No track currently playing on Spotify. Start playing music to see current track info.',
-        ephemeral: true
+    let embed = {
+      title: '🎵 Current Playback Status',
+      color: 0x1DB954,
+      fields: [],
+      timestamp: new Date().toISOString()
+    };
+
+    // Discord bot status
+    if (queue.songs.length > 0 && queue.playing) {
+      const currentSong = queue.songs[0];
+      embed.fields.push({
+        name: '🤖 Discord Bot - Now Playing',
+        value: `**${currentSong.title}**\nSource: ${currentSong.source}`,
+        inline: false
       });
-      return;
+    } else {
+      embed.fields.push({
+        name: '🤖 Discord Bot',
+        value: 'Nothing currently playing',
+        inline: false
+      });
     }
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x1DB954)
-      .setTitle(currentTrack.is_playing ? '🎵 Currently Playing' : '⏸️ Paused')
-      .setDescription(`**${currentTrack.name}**\nby ${currentTrack.artists}`)
-      .addFields(
-        { name: '💽 Album', value: currentTrack.album, inline: true },
-        { name: '⏱️ Progress', value: `${formatDuration(Math.floor(currentTrack.progress_ms / 1000))} / ${formatDuration(Math.floor(currentTrack.duration_ms / 1000))}`, inline: true },
-        { name: '🎵 Source', value: 'Spotify', inline: true }
-      )
-      .setThumbnail(currentTrack.image)
-      .setFooter({ text: 'Live from your Spotify account' });
-    
-    if (currentTrack.spotify_url) {
-      embed.setURL(currentTrack.spotify_url);
+
+    // Spotify status (if authenticated)
+    if (userHasSpotify) {
+      try {
+        const spotifyPlayback = await getUserCurrentPlayback(userId);
+        
+        if (spotifyPlayback && spotifyPlayback.is_playing) {
+          const track = spotifyPlayback.item;
+          const progress = Math.floor(spotifyPlayback.progress_ms / 1000);
+          const duration = Math.floor(track.duration_ms / 1000);
+          
+          const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+          };
+
+          embed.fields.push({
+            name: '🎵 Your Spotify - Now Playing',
+            value: `**${track.name}**\nby ${track.artists.map(a => a.name).join(', ')}\n⏱️ ${formatTime(progress)} / ${formatTime(duration)}\n📱 ${spotifyPlayback.device.name}`,
+            inline: false
+          });
+          
+          if (track.album.images[0]) {
+            embed.thumbnail = { url: track.album.images[0].url };
+          }
+        } else {
+          embed.fields.push({
+            name: '🎵 Your Spotify',
+            value: 'Nothing currently playing',
+            inline: false
+          });
+        }
+      } catch (spotifyError) {
+        embed.fields.push({
+          name: '🎵 Your Spotify',
+          value: 'Could not retrieve Spotify status',
+          inline: false
+        });
+      }
+    } else {
+      embed.fields.push({
+        name: '🎵 Spotify Integration',
+        value: 'Use `/spotify login` to connect your account and see your personal Spotify playback here!',
+        inline: false
+      });
     }
-    
+
     await interaction.editReply({ embeds: [embed] });
-    
   } catch (error) {
-    console.error('Current track error:', error);
-    await interaction.editReply({
-      content: '❌ Failed to get current track information. Make sure you have an active Spotify session.',
-      ephemeral: true
-    });
+    console.error('Error in current command:', error);
+    await interaction.editReply('❌ Error retrieving current playback status.');
   }
 }
 
@@ -615,140 +691,115 @@ async function handleCurrent(interaction) {
  * Handle pause command
  */
 async function handlePause(interaction) {
+  const guildId = interaction.guildId;
+  const queue = getQueue(guildId);
+  
+  await interaction.deferReply({ ephemeral: true });
+
+  if (!queue.playing) {
+    return interaction.editReply('⏸️ Nothing is currently playing in Discord!');
+  }
+
   try {
-    const success = await pausePlayback();
+    queue.player.pause();
+    queue.playing = false;
     
-    if (success) {
-      await interaction.reply({
-        content: '⏸️ Spotify playback paused.',
-        ephemeral: false
-      });
-    } else {
-      await interaction.reply({
-        content: '❌ Failed to pause playback. Make sure you have an active Spotify session.',
-        ephemeral: true
-      });
+    let message = '⏸️ **Discord Playback Paused**\n\nUse `/music resume` to continue.';
+    
+    const userId = interaction.user.id;
+    if (isUserAuthenticated(userId)) {
+      message += '\n\n💡 **Tip:** Use `/spotify control pause` to pause your personal Spotify playback.';
     }
+    
+    await interaction.editReply(message);
   } catch (error) {
-    await interaction.reply({
-      content: '❌ Error pausing playback. Check your Spotify connection.',
-      ephemeral: true
-    });
+    console.error('Error pausing playback:', error);
+    await interaction.editReply('❌ Failed to pause playback.');
   }
 }
 
 async function handleResume(interaction) {
+  const guildId = interaction.guildId;
+  const queue = getQueue(guildId);
+  
+  await interaction.deferReply({ ephemeral: true });
+
+  if (queue.playing) {
+    return interaction.editReply('▶️ Discord playback is already running!');
+  }
+
+  if (queue.songs.length === 0) {
+    return interaction.editReply('❌ No songs in the Discord queue to resume.');
+  }
+
   try {
-    const success = await resumePlayback();
+    queue.player.unpause();
+    queue.playing = true;
     
-    if (success) {
-      await interaction.reply({
-        content: '▶️ Spotify playback resumed.',
-        ephemeral: false
-      });
-    } else {
-      await interaction.reply({
-        content: '❌ Failed to resume playback. Make sure you have an active Spotify session.',
-        ephemeral: true
-      });
+    let message = '▶️ **Discord Playback Resumed**';
+    
+    const userId = interaction.user.id;
+    if (isUserAuthenticated(userId)) {
+      message += '\n\n💡 **Tip:** Use `/spotify control play` to resume your personal Spotify playback.';
     }
+    
+    await interaction.editReply(message);
   } catch (error) {
-    await interaction.reply({
-      content: '❌ Error resuming playback. Check your Spotify connection.',
-      ephemeral: true
-    });
+    console.error('Error resuming playback:', error);
+    await interaction.editReply('❌ Failed to resume playback.');
   }
 }
 
 async function handleSkip(interaction) {
+  const guildId = interaction.guildId;
+  const queue = getQueue(guildId);
+  
+  await interaction.deferReply({ ephemeral: true });
+
+  if (queue.songs.length === 0) {
+    return interaction.editReply('❌ No songs in the Discord queue to skip.');
+  }
+
+  if (queue.songs.length === 1) {
+    return interaction.editReply('❌ This is the last song in the Discord queue.');
+  }
+
   try {
-    const success = await skipToNext();
+    const currentSong = queue.songs[0];
+    queue.player.stop(); // This will trigger the 'idle' event and advance to next song
     
-    if (success) {
-      await interaction.reply({
-        content: '⏭️ Skipped to next track on Spotify.',
-        ephemeral: false
-      });
-    } else {
-      await interaction.reply({
-        content: '❌ Failed to skip track. Make sure you have an active Spotify session.',
-        ephemeral: true
-      });
+    let message = `⏭️ **Skipped:** ${currentSong.title}`;
+    
+    const userId = interaction.user.id;
+    if (isUserAuthenticated(userId)) {
+      message += '\n\n💡 **Tip:** Use `/spotify control next` to skip tracks on your personal Spotify.';
     }
+    
+    await interaction.editReply(message);
   } catch (error) {
-    await interaction.reply({
-      content: '❌ Error skipping track. Check your Spotify connection.',
-      ephemeral: true
-    });
+    console.error('Error skipping track:', error);
+    await interaction.editReply('❌ Failed to skip track.');
   }
 }
 
 async function handlePrevious(interaction) {
-  try {
-    const success = await skipToPrevious();
-    
-    if (success) {
-      await interaction.reply({
-        content: '⏮️ Went to previous track on Spotify.',
-        ephemeral: false
-      });
-    } else {
-      await interaction.reply({
-        content: '❌ Failed to go to previous track. Make sure you have an active Spotify session.',
-        ephemeral: true
-      });
-    }
-  } catch (error) {
-    await interaction.reply({
-      content: '❌ Error going to previous track. Check your Spotify connection.',
-      ephemeral: true
-    });
-  }
-}
-
-/**
- * Handle devices command
- */
-async function handleDevices(interaction) {
-  await interaction.deferReply();
+  const guildId = interaction.guildId;
+  const queue = getQueue(guildId);
   
-  try {
-    const devices = await getAvailableDevices();
-    
-    if (!devices || devices.length === 0) {
-      await interaction.editReply({
-        content: '📱 No Spotify devices found. Open Spotify on a device to see it here.',
-        ephemeral: true
-      });
-      return;
-    }
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x1DB954)
-      .setTitle('📱 Available Spotify Devices')
-      .setDescription('Your connected Spotify devices:')
-      .setFooter({ text: `Found ${devices.length} device(s)` });
-    
-    devices.forEach(device => {
-      const statusIcon = device.is_active ? '🟢' : '⚪';
-      const deviceInfo = `**Type:** ${device.type}\n**Volume:** ${device.volume_percent}%\n**Status:** ${device.is_active ? 'Active' : 'Available'}`;
-      
-      embed.addFields({
-        name: `${statusIcon} ${device.name}`,
-        value: deviceInfo,
-        inline: true
-      });
-    });
-    
-    await interaction.editReply({ embeds: [embed] });
-    
-  } catch (error) {
-    console.error('Devices error:', error);
-    await interaction.editReply({
-      content: '❌ Failed to get device list. Make sure you have an active Spotify session.',
-      ephemeral: true
-    });
+  await interaction.deferReply({ ephemeral: true });
+
+  // Discord bot doesn't have previous functionality in the queue system
+  // This is a limitation compared to Spotify
+  let message = '❌ **Previous Track Not Available**\n\nThe Discord bot queue doesn\'t support going to the previous track.';
+  
+  const userId = interaction.user.id;
+  if (isUserAuthenticated(userId)) {
+    message += '\n\n💡 **Spotify Alternative:** Use `/spotify control previous` to go back on your personal Spotify playback!';
+  } else {
+    message += '\n\n💡 **Tip:** Connect your Spotify account with `/spotify login` to get previous track functionality!';
   }
+  
+  await interaction.editReply(message);
 }
 
 /**
@@ -761,4 +812,61 @@ function formatDuration(seconds) {
   const remainingSeconds = seconds % 60;
   
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+async function handleSpotifyQueueAdd(interaction, query, userId) {
+  try {
+    // Search for the song
+    const searchResults = await aggregateMusicSearch(query, {
+      sources: ['spotify'],
+      maxResults: 5,
+      timeout: 10000
+    });
+
+    if (!searchResults || searchResults.length === 0 || searchResults[0].isError) {
+      return interaction.editReply('❌ No Spotify results found for your search. Try a different search term.');
+    }
+
+    const firstResult = searchResults[0];
+    
+    if (!firstResult.spotifyUri) {
+      return interaction.editReply('❌ Selected track is not available on Spotify. Please try a different song.');
+    }
+
+    // Extract track ID from URI
+    const trackId = firstResult.spotifyUri.split(':')[2];
+    const success = await addToUserQueue(userId, firstResult.spotifyUri);
+    
+    if (success) {
+      const embed = {
+        title: '✅ Added to Spotify Queue',
+        description: `Successfully added **${firstResult.title}** to your Spotify queue!`,
+        color: 0x1DB954,
+        fields: [
+          { name: '🎵 Song', value: firstResult.title, inline: false },
+          { name: '🎧 Source', value: 'Spotify', inline: true },
+          { name: '⏱️ Duration', value: firstResult.duration || 'Unknown', inline: true }
+        ],
+        thumbnail: { url: firstResult.thumbnail },
+        footer: { text: 'The song will play after your current track finishes' }
+      };
+      
+      await interaction.editReply({ embeds: [embed] });
+    } else {
+      await interaction.editReply('❌ Failed to add track to your Spotify queue. Make sure you have an active Spotify device and try again.');
+    }
+  } catch (error) {
+    console.error('Error adding to Spotify queue:', error);
+    let errorMessage = '❌ Failed to add to Spotify queue.\n\n';
+    
+    if (error.message.includes('NO_ACTIVE_DEVICE')) {
+      errorMessage += 'No active Spotify device found. Please:\n• Open Spotify on any device\n• Start playing something\n• Try the command again';
+    } else if (error.message.includes('PREMIUM_REQUIRED')) {
+      errorMessage += 'Adding to queue requires Spotify Premium.';
+    } else {
+      errorMessage += `Error: ${error.message}`;
+    }
+    
+    await interaction.editReply(errorMessage);
+  }
 }
