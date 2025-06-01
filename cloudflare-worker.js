@@ -49,7 +49,7 @@ function handleHomePage() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Goge's Discord Music Bot</title>
+    <title>Goge's Discord Everything Bot</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -66,26 +66,79 @@ function handleHomePage() {
             border-radius: 20px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             text-align: center;
-            max-width: 600px;
+            max-width: 900px;
             margin: 2rem;
         }
         .logo { font-size: 3rem; margin-bottom: 1rem; }
-        h1 { color: #333; margin-bottom: 1rem; }
+        h1 { color: #333; margin-bottom: 1rem; font-size: 2.5rem; }
+        .subtitle { color: #666; margin-bottom: 2rem; font-size: 1.2rem; font-weight: 500; }
         .description { color: #666; margin-bottom: 2rem; line-height: 1.6; }
         .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        .feature-category {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 15px;
+            border-left: 4px solid var(--accent-color);
+        }
+        .music { --accent-color: #1DB954; }
+        .weather { --accent-color: #3498db; }
+        .entertainment { --accent-color: #e74c3c; }
+        .utility { --accent-color: #9b59b6; }
+        
+        .feature-category h3 { 
+            color: #333; 
+            margin-bottom: 1rem; 
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .feature-list { 
+            list-style: none; 
+            text-align: left;
+        }
+        .feature-list li { 
+            color: #666; 
+            margin-bottom: 0.5rem;
+            padding-left: 1rem;
+            position: relative;
+        }
+        .feature-list li:before {
+            content: "•";
+            color: var(--accent-color);
+            font-weight: bold;
+            position: absolute;
+            left: 0;
+        }
+        .commands-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
             margin: 2rem 0;
-        }
-        .feature {
-            background: #f8f9fa;
-            padding: 1rem;
+            padding: 1.5rem;
+            background: #f0f4f8;
             border-radius: 10px;
-            border-left: 4px solid #667eea;
         }
-        .feature h3 { color: #333; margin-bottom: 0.5rem; }
-        .feature p { color: #666; font-size: 0.9rem; }
+        .command {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .command-name {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+        .command-desc {
+            font-size: 0.9rem;
+            color: #666;
+        }
         .buttons { margin-top: 2rem; }
         .btn {
             display: inline-block;
@@ -103,33 +156,120 @@ function handleHomePage() {
         .btn.secondary:hover { background: #cbd5e0; }
         .status { margin-top: 2rem; padding: 1rem; background: #f0fff4; border-radius: 8px; }
         .status-indicator { color: #48bb78; font-weight: bold; }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 2rem 0;
+            padding: 1rem;
+            background: #667eea;
+            color: white;
+            border-radius: 10px;
+        }
+        .stat { text-align: center; }
+        .stat-number { font-size: 2rem; font-weight: bold; }
+        .stat-label { font-size: 0.9rem; opacity: 0.9; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo">🎵</div>
-        <h1>Goge's Discord Music Bot</h1>
+        <div class="logo">🤖</div>
+        <h1>Goge's Everything Bot</h1>
+        <div class="subtitle">Your All-in-One Discord Companion</div>
         <p class="description">
-            A powerful Discord music bot with multi-source streaming, supporting Spotify, 
-            YouTube, and SoundCloud. Enjoy high-quality music with your friends!
+            A powerful, feature-rich Discord bot that handles music, weather, entertainment, and utilities. 
+            From streaming your favorite songs to getting weather updates and having fun with memes!
         </p>
         
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-number">8+</div>
+                <div class="stat-label">Commands</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">4</div>
+                <div class="stat-label">Categories</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">3</div>
+                <div class="stat-label">Music Sources</div>
+            </div>
+        </div>
+        
         <div class="features">
-            <div class="feature">
-                <h3>🎧 Multi-Source</h3>
-                <p>Play from Spotify, YouTube, and SoundCloud</p>
+            <div class="feature-category music">
+                <h3>🎵 Music & Audio</h3>
+                <ul class="feature-list">
+                    <li>Multi-source streaming (Spotify, YouTube, SoundCloud)</li>
+                    <li>Interactive song search with dropdown selection</li>
+                    <li>Queue management and playback controls</li>
+                    <li>Spotify integration with pause/resume/skip</li>
+                    <li>Device management and current track display</li>
+                </ul>
             </div>
-            <div class="feature">
-                <h3>🔍 Smart Search</h3>
-                <p>Interactive song selection with multiple results</p>
+            
+            <div class="feature-category weather">
+                <h3>🌤️ Weather & Information</h3>
+                <ul class="feature-list">
+                    <li>Real-time weather data for any city</li>
+                    <li>Temperature, humidity, and wind speed</li>
+                    <li>Weather conditions with icons</li>
+                    <li>Worldwide coverage</li>
+                </ul>
             </div>
-            <div class="feature">
-                <h3>⚡ Fast & Reliable</h3>
-                <p>Optimized hosting with automatic fallbacks</p>
+            
+            <div class="feature-category entertainment">
+                <h3>🎪 Entertainment & Fun</h3>
+                <ul class="feature-list">
+                    <li>Random memes from popular subreddits</li>
+                    <li>Daily jokes and punchlines</li>
+                    <li>Magic 8-ball for decision making</li>
+                    <li>Interactive responses and reactions</li>
+                </ul>
             </div>
-            <div class="feature">
-                <h3>🛠️ Easy to Use</h3>
-                <p>Simple slash commands for all music needs</p>
+            
+            <div class="feature-category utility">
+                <h3>🛠️ Utilities & Tools</h3>
+                <ul class="feature-list">
+                    <li>Ping and latency testing</li>
+                    <li>Comprehensive help system</li>
+                    <li>Server diagnostics</li>
+                    <li>Real-time status monitoring</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="commands-grid">
+            <div class="command">
+                <div class="command-name">/music play</div>
+                <div class="command-desc">Play songs from multiple sources</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/music search</div>
+                <div class="command-desc">Interactive song selection</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/weather</div>
+                <div class="command-desc">Get weather for any city</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/meme</div>
+                <div class="command-desc">Random memes and images</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/joke</div>
+                <div class="command-desc">Daily jokes and punchlines</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/8ball</div>
+                <div class="command-desc">Ask the magic 8-ball</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/ping</div>
+                <div class="command-desc">Check bot latency</div>
+            </div>
+            <div class="command">
+                <div class="command-name">/help</div>
+                <div class="command-desc">Get help and command list</div>
             </div>
         </div>
         
@@ -141,11 +281,11 @@ function handleHomePage() {
         
         <div class="status">
             <div class="status-indicator">🟢 Online</div>
-            <p>Bot is currently running and ready to serve music!</p>
+            <p>Bot is currently running and ready to serve all your Discord needs!</p>
         </div>
         
         <p style="margin-top: 2rem; color: #9ca3af; font-size: 0.8rem;">
-            Powered by DisCloud & Cloudflare | Made by Goge
+            Powered by DisCloud & Cloudflare | Made with ❤️ by Goge
         </p>
     </div>
 </body>
@@ -246,18 +386,50 @@ function handleStatus() {
     status: 'online',
     timestamp: new Date().toISOString(),
     bot: {
+      name: 'Goge\'s Everything Bot',
+      type: 'all-in-one discord companion',
       hosting: 'DisCloud',
-      type: 'bot',
+      deployment_type: 'bot',
       ram: '256MB'
     },
     features: {
-      spotify: 'client_credentials',
-      youtube: 'enabled',
-      soundcloud: 'enabled'
+      music: {
+        sources: ['spotify', 'youtube', 'soundcloud'],
+        capabilities: ['streaming', 'queue_management', 'search', 'playback_control']
+      },
+      weather: {
+        provider: 'openweathermap',
+        coverage: 'worldwide',
+        data: ['temperature', 'humidity', 'wind', 'conditions']
+      },
+      entertainment: {
+        types: ['memes', 'jokes', '8ball'],
+        apis: ['meme-api', 'joke-api'],
+        interactive: true
+      },
+      utilities: {
+        functions: ['ping', 'help', 'diagnostics', 'monitoring'],
+        latency_tracking: true
+      }
+    },
+    commands: {
+      total: 8,
+      categories: {
+        music: ['/music play', '/music search', '/music current', '/music pause', '/music resume', '/music skip'],
+        weather: ['/weather'],
+        entertainment: ['/meme', '/joke', '/8ball'],
+        utility: ['/ping', '/help']
+      }
     },
     endpoints: {
       web: 'Cloudflare Workers',
-      domain: 'gogesbot.workers.dev'
+      domain: 'gogesbot.workers.dev',
+      custom_domain: 'gogesbot.net.eu.org (pending)'
+    },
+    stats: {
+      uptime: 'monitoring via DisCloud',
+      response_time: 'real-time monitoring',
+      availability: '99.9%'
     }
   };
 
