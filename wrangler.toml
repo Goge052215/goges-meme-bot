@@ -1,0 +1,23 @@
+name = "gogesbot"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-05-31"
+
+# Environment variables (set these in Cloudflare Dashboard)
+# DO NOT put actual values here - this file goes in Git!
+
+[env.production]
+name = "gogesbot"
+
+[env.staging]
+name = "gogesbot-staging"
+
+# Example of how to reference environment variables in code:
+# env.DISCORD_TOKEN
+# env.SPOTIFY_CLIENT_ID  
+# env.SPOTIFY_CLIENT_SECRET
+
+# To set these variables:
+# 1. Go to Cloudflare Workers Dashboard
+# 2. Select your worker
+# 3. Go to Settings > Variables
+# 4. Add each variable securely 

@@ -1,0 +1,57 @@
+{
+  "name": "goges-meme-bot",
+  "version": "2.0.0",
+  "description": "A powerful Discord everything bot",
+  "main": "replit_memebot.js",
+  "scripts": {
+    "start": "node replit_memebot.js",
+    "dev": "node replit_memebot.js",
+    "build": "npm run clean && npm run create-deployment",
+    "clean": "rm -f goges_memebot.zip",
+    "create-deployment": "zip -r goges_memebot.zip . -x 'node_modules/*' '.DS_Store' 'venv/*' '.vscode/*' '.cursor/*' 'package-lock.json' '*.zip' '.git/*'",
+    "deploy:discloud": "npm run build && echo 'Upload goges_memebot.zip to DisCloud dashboard'",
+    "deploy:worker": "wrangler publish",
+    "test": "echo 'No tests specified'",
+    "lint": "echo 'No linting configured yet'"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "music",
+    "spotify",
+    "youtube",
+    "soundcloud",
+    "streaming"
+  ],
+  "author": "Goge",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@discordjs/rest": "^2.2.0",
+    "@discordjs/voice": "^0.16.1",
+    "discord-api-types": "^0.37.83",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.7.13",
+    "node-fetch": "^2.7.0",
+    "opusscript": "^0.0.8",
+    "sodium-native": "^4.1.1",
+    "spotify-web-api-node": "^5.0.2",
+    "youtube-dl-exec": "^3.0.5"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/goges-discord-music-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/goges-discord-music-bot/issues"
+  },
+  "homepage": "https://gogesbot.workers.dev"
+}

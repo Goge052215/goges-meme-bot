@@ -1,0 +1,14 @@
+node_modules/
+venv/
+.git/
+.DS_Store
+*.log
+test_*.js
+refresh_cookies.*
+.cursor/
+.vscode/
+package-lock.json
+.env.local
+.env.development
+.env.production
+*.zip 
