@@ -447,7 +447,7 @@ server.all('/', (req, res) => {
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial; max-width: 700px; margin: 50px auto; padding: 30px; background: #f8f9fa;">
         <div style="text-align: center; margin-bottom: 40px;">
           <h1 style="color: #1DB954; font-size: 2.5em; margin-bottom: 10px;">🎵 Discord Music Bot</h1>
-          <h2 style="color: #333; font-weight: 300;">Spotify Authorization</h2>
+          <h2 style="color: #555; font-weight: 300;">Spotify Authorization</h2>
         </div>
         
         <div style="background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 30px;">
@@ -470,7 +470,7 @@ server.all('/', (req, res) => {
         </div>
 
         <div style="background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-          <h3 style="color: #333; margin-bottom: 15px;">✨ Available Commands After Authorization:</h3>
+          <h3 style="color: #555; margin-bottom: 15px;">✨ Available Commands After Authorization:</h3>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; font-family: monospace;">
             <div><code>/music play [song]</code><br><small>Play on your Spotify</small></div>
             <div><code>/music pause</code><br><small>Pause playback</small></div>
