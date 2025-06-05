@@ -40,4 +40,8 @@ jspm_packages/
 .npm
 .node_repl_history
 *.tgz
-.yarn-integrity 
+.yarn-integrity
+
+# Private web interface - keep separate from version control
+cloudflare-worker.js
+*.worker.js 
