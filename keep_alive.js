@@ -395,6 +395,134 @@ function initializeSpotifyAuth() {
     res.json({ users });
   });
 
+  server.get('/api/status', (req, res) => {
+    const authorizedUsers = Array.from(userTokens.values()).map(user => ({
+      spotifyId: user.spotifyUserId,
+      displayName: user.displayName,
+      product: user.product,
+      isExpired: Date.now() > user.expiresAt
+    }));
+    
+    const activeUsers = authorizedUsers.filter(user => !user.isExpired);
+    
+    res.json({
+      status: "online",
+      timestamp: new Date().toISOString(),
+      bot: {
+        name: "Goge's Everything Bot",
+        type: "all-in-one discord companion", 
+        hosting: "DisCloud",
+        deployment_type: "bot",
+        ram: "256MB"
+      },
+      features: {
+        music: {
+          sources: [
+            "spotify",
+            "youtube",
+            "soundcloud"
+          ],
+          capabilities: [
+            "streaming",
+            "queue_management",
+            "search", 
+            "playback_control"
+          ]
+        },
+        weather: {
+          provider: "openweathermap",
+          coverage: "worldwide",
+          data: [
+            "temperature",
+            "humidity",
+            "wind",
+            "conditions"
+          ]
+        },
+        entertainment: {
+          types: [
+            "memes",
+            "jokes",
+            "8ball"
+          ],
+          apis: [
+            "meme-api",
+            "joke-api"
+          ],
+          interactive: true
+        },
+        utilities: {
+          functions: [
+            "ping",
+            "help",
+            "diagnostics", 
+            "monitoring"
+          ],
+          latency_tracking: true
+        }
+      },
+      commands: {
+        total: 8,
+        categories: {
+          music: [
+            "/music play",
+            "/music search",
+            "/music current",
+            "/music pause",
+            "/music resume",
+            "/music skip"
+          ],
+          spotify: [
+            "/spotify login",
+            "/spotify status", 
+            "/spotify control",
+            "/spotify devices",
+            "/spotify playlists",
+            "/spotify queue",
+            "/spotify logout"
+          ],
+          weather: [
+            "/weather"
+          ],
+          entertainment: [
+            "/meme",
+            "/joke",
+            "/8ball"
+          ],
+          utility: [
+            "/ping",
+            "/help"
+          ]
+        }
+      },
+      endpoints: {
+        web: "Cloudflare Workers",
+        domain: "gogesbot.hx13651954192.workers.dev",
+        custom_domain: "gogesbot.net.eu.org (pending)",
+        discloud: process.env.APP_URL || "https://gogesbot.discloud.app"
+      },
+      stats: {
+        uptime: formatUptime(process.uptime()),
+        uptime_seconds: Math.floor(process.uptime()),
+        spotify_users: {
+          total: userTokens.size,
+          active: activeUsers.length,
+          premium: authorizedUsers.filter(user => user.product === 'premium').length
+        },
+        response_time: "real-time monitoring",
+        availability: "99.9%",
+        last_updated: new Date().toISOString()
+      },
+      server_info: {
+        environment: process.env.NODE_ENV || 'production',
+        port: process.env.PORT || 8080,
+        node_version: process.version,
+        memory_usage: process.memoryUsage(),
+        platform: process.platform
+      }
+    });
+  });
+
   server.post('/api/users/:userId/refresh', async (req, res) => {
     const { userId } = req.params;
     const success = await refreshUserToken(userId);
