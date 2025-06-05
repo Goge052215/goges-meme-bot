@@ -113,6 +113,79 @@ function initializeSpotifyAuth() {
     res.redirect(authURL);
   });
 
+  // POST endpoint for OAuth callbacks forwarded from Cloudflare Worker
+  server.post('/spotify/callback', express.json(), async (req, res) => {
+    try {
+      const { code, state, userId } = req.body;
+      
+      if (!code || !state || !userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required parameters: code, state, or userId'
+        });
+      }
+
+      console.log(`📞 Received OAuth callback for Discord user: ${userId}`);
+      
+      const { processCallbackFromWorker } = require('./media/spotifyUtils');
+      const result = await processCallbackFromWorker(userId, code, state);
+      
+      if (result.success) {
+        console.log(`✅ OAuth successful for Discord user ${userId}`);
+        
+        res.json({
+          success: true,
+          message: 'Spotify account connected successfully',
+          userInfo: result.userInfo
+        });
+      } else {
+        console.log(`❌ OAuth failed for Discord user ${userId}: ${result.error}`);
+        
+        res.status(400).json({
+          success: false,
+          error: result.error || 'Authentication failed'
+        });
+      }
+    } catch (error) {
+      console.error('❌ OAuth callback processing error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error during authentication'
+      });
+    }
+  });
+
+  // Health check endpoint
+  server.get('/health', (req, res) => {
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      spotify: {
+        initialized: !!spotifyApi,
+        activeTokens: userTokens.size
+      }
+    });
+  });
+
+  server.get('/spotify/status/:userId', (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { getAuthStatus } = require('./media/spotifyUtils');
+      const status = getAuthStatus(userId);
+      
+      res.json({
+        success: true,
+        status: status
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
   server.get('/callback', async (req, res) => {
     const { code, error } = req.query;
     
@@ -144,7 +217,6 @@ function initializeSpotifyAuth() {
       const tokenResponse = await spotifyApi.authorizationCodeGrant(code);
       const { access_token, refresh_token, expires_in } = tokenResponse.body;
       
-      // Set tokens for this authorization session
       spotifyApi.setAccessToken(access_token);
       spotifyApi.setRefreshToken(refresh_token);
       

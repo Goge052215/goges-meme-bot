@@ -484,7 +484,6 @@ async function handleQueue(interaction, userId) {
         let trackUri = null;
         
         if (isSpotifyUrl(songInput)) {
-            // Extract track ID from Spotify URL
             const trackId = getSpotifyTrackId(songInput);
             if (trackId) {
                 trackUri = `spotify:track:${trackId}`;
@@ -492,8 +491,6 @@ async function handleQueue(interaction, userId) {
                 throw new Error('Invalid Spotify URL format');
             }
         } else {
-            // For now, we'll need the user to provide a Spotify URL
-            // In the future, we could search and let them select
             throw new Error('Please provide a Spotify track URL. Song search coming soon!');
         }
 

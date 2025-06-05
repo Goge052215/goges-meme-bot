@@ -2,13 +2,12 @@ require('dotenv').config({ path: './config.env' });
 const { createInterface } = require('node:readline');
 const { execSync } = require('child_process');
 const fetch = require('node-fetch');
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
-const { REST } = require('@discordjs/rest');
-const { Routes } = require('discord-api-types/v10');
+const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { cookieManager } = require('./media/cookieManager');
 const { initializeSpotifyApi, setAccessToken } = require('./media/spotifyUtils');
+const keepAlive = require('./keep_alive');
 
 const { loadCommands } = require('./commands/index');
 
@@ -173,6 +172,9 @@ const question = (q) => new Promise((resolve) => rl.question(q, resolve));
   }
 
   console.log('DONE | Meme Bot is up and running. DO NOT CLOSE THIS TAB UNLESS YOU ARE FINISHED USING THE BOT, IT WILL PUT THE BOT OFFLINE.');
+  
+  // Start the Express server for OAuth callbacks and health checks
+  keepAlive();
 })();
 
 // Cleanup on bot shutdown

@@ -15,9 +15,6 @@ class CookieManager {
         this.validationCooldown = 300000; // 5 minutes
     }
 
-    /**
-     * Check if cookies file exists and has content
-     */
     cookiesExist() {
         try {
             return fs.existsSync(this.cookiesPath) && fs.statSync(this.cookiesPath).size > 100;
@@ -26,13 +23,9 @@ class CookieManager {
         }
     }
 
-    /**
-     * Simplified cookie test (primarily for SoundCloud)
-     */
     async testCookies() {
         const now = Date.now();
         
-        // Don't test too frequently
         if (now - this.lastValidationTime < this.validationCooldown) {
             console.log('[CookieManager] Skipping cookie test due to cooldown');
             return this.cookiesValid;
@@ -46,9 +39,7 @@ class CookieManager {
 
         try {
             console.log('[CookieManager] Testing cookies for SoundCloud support...');
-            
-            // Simple test - just check if cookies are readable
-                        const cookieContent = fs.readFileSync(this.cookiesPath, 'utf8');
+            const cookieContent = fs.readFileSync(this.cookiesPath, 'utf8');
             if (cookieContent && cookieContent.length > 100) {
                 console.log('[CookieManager] Cookies are present and readable');
                 this.cookiesValid = true;
@@ -64,13 +55,9 @@ class CookieManager {
         return false;
     }
 
-    /**
-     * Get flags for yt-dlp (mainly for SoundCloud fallback)
-     */
     async getYtDlpFlags(baseFlags = {}) {
         const flags = { ...baseFlags };
         
-        // Only use cookies if they exist and are valid
         if (this.cookiesExist()) {
             const isValid = await this.testCookies();
             if (isValid) {
@@ -83,7 +70,6 @@ class CookieManager {
             console.log('[CookieManager] No cookies available');
     }
 
-        // Add basic headers for better success rate
         if (!flags.addHeader) {
             flags.addHeader = [];
         }
@@ -124,9 +110,6 @@ class CookieManager {
         }
     }
 
-    /**
-     * Initialize - simplified for Spotify-focused bot
-     */
     async initialize() {
         console.log('[CookieManager] Initializing simplified cookie manager for SoundCloud fallback...');
         
@@ -136,9 +119,6 @@ class CookieManager {
         console.log('[CookieManager] Initialization complete');
     }
 
-    /**
-     * Cleanup - simplified
-     */
     cleanup() {
         console.log('[CookieManager] Cleanup complete');
     }

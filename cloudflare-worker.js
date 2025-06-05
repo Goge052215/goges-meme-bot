@@ -26,6 +26,8 @@ export default {
           return handleHomePage();
         case '/spotify/callback':
           return handleSpotifyCallback(url);
+        case '/oauth/spotify':
+          return handleSpotifyOAuthDirect(url);
         case '/spotify/auth':
           return handleSpotifyAuthRedirect(url);
         case '/spotify/status':
@@ -318,7 +320,7 @@ function handleHomePage() {
             <a href="/discord" class="btn spotify">Discord Commands</a>
             <a href="/spotify/guide" class="btn secondary">Spotify Setup</a>
             <a href="/status" class="btn secondary">Bot Status</a>
-            <a href="https://github.com/your-repo" class="btn secondary">GitHub</a>
+            <a href="https://github.com/Goge052215/goges-meme-bot" class="btn secondary">GitHub</a>
         </div>
         
         <div class="status">
@@ -334,7 +336,7 @@ function handleHomePage() {
 }
 
 // Enhanced Spotify OAuth callback handler
-function handleSpotifyCallback(url) {
+async function handleSpotifyCallback(url) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
@@ -350,7 +352,79 @@ function handleSpotifyCallback(url) {
   // Extract Discord user ID from state
   const userId = state.split('_')[0];
   
-  const html = `
+  try {
+    // Try to forward callback to bot server
+    // Update this URL to match your deployed bot's domain
+    const botServerUrl = env.BOT_SERVER_URL || 'https://your-bot-domain.discloud.app'; // Update this!
+    
+    console.log(`Attempting to forward callback to bot server: ${botServerUrl}`);
+    
+    const forwardResponse = await fetch(`${botServerUrl}/spotify/callback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: code,
+        state: state,
+        userId: userId
+      })
+    });
+    
+    if (forwardResponse.ok) {
+      const result = await forwardResponse.json();
+      if (result.success) {
+        return new Response(generateSuccessPage(userId, code, true, false), {
+          headers: { 'Content-Type': 'text/html', ...corsHeaders }
+        });
+      }
+    }
+    
+    // If forwarding failed, use fallback mode
+    console.log('Bot server forwarding failed, using fallback mode');
+    return new Response(generateSuccessPage(userId, code, false, true), {
+      headers: { 'Content-Type': 'text/html', ...corsHeaders }
+    });
+    
+  } catch (fetchError) {
+    console.error('Failed to forward callback to bot:', fetchError);
+    
+    // Fallback: Show success page with manual instructions
+    return new Response(generateSuccessPage(userId, code, false, true), {
+      headers: { 'Content-Type': 'text/html', ...corsHeaders }
+    });
+  }
+}
+
+// Generate success page HTML
+function generateSuccessPage(userId, code, botNotified, fallbackMode = false) {
+  let statusMessage, statusClass, extraInstructions = '';
+  
+  if (fallbackMode) {
+    statusMessage = '⚠️ Bot server not deployed yet - Manual verification required';
+    statusClass = 'warning';
+    extraInstructions = `
+      <div class="fallback-info">
+        <h4>🔄 Manual Verification Required</h4>
+        <p>Your Spotify authorization was successful! However, the Discord bot server isn't deployed yet.</p>
+        <p><strong>What to do next:</strong></p>
+        <ol style="text-align: left; margin: 1rem 2rem;">
+          <li><strong>Deploy your bot</strong> to DisCloud first</li>
+          <li><strong>Get the actual domain</strong> from DisCloud (e.g., your-app.discloud.app)</li>
+          <li><strong>Update Cloudflare Worker</strong> with the correct domain</li>
+          <li><strong>Try</strong> <code>/spotify login</code> again in Discord</li>
+        </ol>
+        <p><strong>Alternative:</strong> Run the bot locally to test OAuth functionality!</p>
+      </div>`;
+  } else if (botNotified) {
+    statusMessage = '✅ Your Discord bot has been notified and your account is now connected!';
+    statusClass = 'success';
+  } else {
+    statusMessage = '⚠️ Connection successful, but please verify in Discord using /spotify status';
+    statusClass = 'warning';
+  }
+  
+  return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -389,20 +463,6 @@ function handleSpotifyCallback(url) {
             font-family: monospace;
             font-size: 0.9rem;
         }
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #1DB954;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-right: 10px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
         .btn {
             display: inline-block;
             padding: 12px 24px;
@@ -415,63 +475,162 @@ function handleSpotifyCallback(url) {
             transition: background 0.3s;
         }
         .btn:hover { background: #1ed760; }
-        .status { margin-top: 2rem; padding: 1rem; background: #e8f5e8; border-radius: 8px; }
-        .error { background: #fee; color: #c53030; }
+        .status { margin-top: 2rem; padding: 1rem; border-radius: 8px; }
         .success { background: #e8f5e8; color: #38a169; }
+        .warning { background: #fff3cd; color: #856404; }
+        .error { background: #fee; color: #c53030; }
+        .commands {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .commands code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .fallback-info {
+            margin-top: 1rem;
+            padding: 1.5rem;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            color: #856404;
+        }
+        .fallback-info h4 {
+            color: #856404;
+            margin-bottom: 1rem;
+        }
+        .fallback-info ol {
+            margin: 1rem 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="logo">🎵</div>
         <h1>Spotify Authentication</h1>
-        <div class="message">
-            <div class="loading"></div>
-            Processing your Spotify authentication...
+        
+        <div class="status ${statusClass}">
+            <strong>${statusMessage}</strong>
         </div>
         
         <div class="code-info">
             <strong>User ID:</strong> ${userId}<br>
             <strong>Auth Code:</strong> ${code.substring(0, 20)}...<br>
-            <strong>Status:</strong> <span id="status">Connecting to bot...</span>
+            <strong>Status:</strong> ${botNotified ? 'Bot Notified ✅' : 'Manual Verification Required ⚠️'}
         </div>
         
-        <div id="result-message"></div>
+        <div class="commands">
+            <strong>Next Steps:</strong><br>
+            1. Return to Discord<br>
+            2. Use <code>/spotify status</code> to verify connection<br>
+            3. Start using enhanced Spotify features!<br><br>
+            
+            <strong>Available Commands:</strong><br>
+            • <code>/spotify control play/pause</code><br>
+            • <code>/spotify devices</code><br>
+            • <code>/spotify playlists</code><br>
+            • <code>/spotify queue &lt;song&gt;</code>
+        </div>
         
         <div style="margin-top: 2rem;">
             <a href="/" class="btn">Return to Home</a>
+            <a href="/spotify/guide" class="btn">View Guide</a>
         </div>
         
-        <div class="status">
-            <strong>Next Steps:</strong><br>
-            1. This page will notify your Discord bot<br>
-            2. Return to Discord and use <code>/spotify status</code> to verify<br>
-            3. Start using enhanced Spotify features!
-        </div>
+        ${extraInstructions}
     </div>
-    
-    <script>
-        // Simulate processing and show success
-        setTimeout(() => {
-            document.getElementById('status').textContent = 'Authentication successful!';
-            document.getElementById('result-message').innerHTML = 
-                '<div class="status success"><strong>Success!</strong> Your Spotify account is now connected to Goge\\'s Bot. You can now use enhanced music features in Discord!</div>';
-        }, 2000);
-        
-        // Optional: Send callback data to Discord bot via webhook or API
-        fetch('/spotify/notify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                userId: '${userId}', 
-                code: '${code}', 
-                state: '${state}' 
-            })
-        }).catch(err => console.log('Bot notification failed:', err));
-    </script>
 </body>
 </html>`;
+}
 
-  return new Response(html, {
+// Generate error page HTML
+function generateErrorPage(title, errorMessage) {
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Error - Goge's Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            color: #333;
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+            margin: 2rem;
+        }
+        .logo { font-size: 4rem; margin-bottom: 1rem; }
+        h1 { color: #dc3545; margin-bottom: 1rem; font-size: 2rem; }
+        .error { background: #fee; color: #c53030; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            margin: 0.5rem;
+            background: #1DB954;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+        .btn:hover { background: #1ed760; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">❌</div>
+        <h1>${title}</h1>
+        <div class="error">
+            <strong>Error:</strong> ${errorMessage}
+        </div>
+        <div>
+            <a href="/spotify/guide" class="btn">Setup Guide</a>
+            <a href="/spotify/help" class="btn">Get Help</a>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+// Direct OAuth processing (fallback when bot server is unavailable)
+async function handleSpotifyOAuthDirect(url) {
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+  
+  if (error) {
+    return handleSpotifyError(error);
+  }
+  
+  if (!code || !state) {
+    return handleSpotifyError('missing_parameters');
+  }
+  
+  // Extract Discord user ID from state
+  const userId = state.split('_')[0];
+  
+  // Since we can't directly store tokens in the Worker (stateless),
+  // we'll provide instructions for manual verification
+  return new Response(generateSuccessPage(userId, code, false, true), {
     headers: { 'Content-Type': 'text/html', ...corsHeaders }
   });
 }
@@ -1163,8 +1322,9 @@ function handleSpotifyHelp() {
         </div>
         
         <div class="navigation">
-            <a href="/discord" class="btn spotify">Discord Commands</a>
-            <a href="/spotify/guide" class="btn">Setup Guide</a>
+            <a href="/discord" class="btn">Discord Commands</a>
+            <a href="/spotify/guide" class="btn">Spotify Setup</a>
+            <a href="/spotify/help" class="btn">Troubleshooting</a>
             <a href="/" class="btn">← Back to Home</a>
         </div>
     </div>
@@ -1406,7 +1566,8 @@ function handleDiscordGuide() {
         </div>
         
         <div class="navigation">
-            <a href="/spotify/guide" class="btn spotify">Spotify Setup</a>
+            <a href="/discord" class="btn">Discord Commands</a>
+            <a href="/spotify/guide" class="btn">Spotify Setup</a>
             <a href="/spotify/help" class="btn">Troubleshooting</a>
             <a href="/" class="btn">← Back to Home</a>
         </div>

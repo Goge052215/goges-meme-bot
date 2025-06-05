@@ -1,39 +1,35 @@
 require('dotenv').config({ path: './config.env' });
 if (!process.env.SPOTIFY_CLIENT_ID) {
-require('dotenv').config({ path: '../config.env' });
+    require('dotenv').config({ path: '../config.env' });
 }
 const SpotifyWebApi = require('spotify-web-api-node');
 
 let spotifyApiInstance = null;
-// User token storage (in production, use a database)
 const userTokens = new Map();
 const tokenRefreshTimers = new Map();
+const pendingAuths = new Map(); // Store pending authentications
 
-console.log('🔍 Checking Spotify credentials...');
-console.log(`SPOTIFY_CLIENT_ID: ${process.env.SPOTIFY_CLIENT_ID ? 'Set (' + process.env.SPOTIFY_CLIENT_ID.length + ' chars)' : 'Not set'}`);
-console.log(`SPOTIFY_CLIENT_SECRET: ${process.env.SPOTIFY_CLIENT_SECRET ? 'Set (' + process.env.SPOTIFY_CLIENT_SECRET.length + ' chars)' : 'Not set'}`);
+initializeModule();
 
-if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
-    const initSuccess = initializeSpotifyApi();
-    if (initSuccess) {
-        console.log('Spotify API auto-initialized on module load');
-        getClientCredentialsToken().then(tokenSuccess => {
-            if (tokenSuccess) {
-                console.log('Spotify client credentials token obtained automatically');
-            } else {
-                console.log('Could not obtain Spotify client credentials token');
-            }
-        });
-    } else {
-        console.log('Spotify API initialization failed');
+async function initializeModule() {
+    if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+        console.log('⚠️ Spotify credentials not found - Spotify features disabled');
+        return;
     }
-} else {
-    console.log('Spotify credentials not found in environment variables');
+
+    if (initializeSpotifyApi()) {
+        const tokenSuccess = await getClientCredentialsToken();
+        if (tokenSuccess) {
+            console.log('✅ Spotify API initialized successfully');
+        } else {
+            console.log('⚠️ Spotify API initialized but token acquisition failed');
+        }
+    }
 }
 
 function initializeSpotifyApi() {
     try {
-        const redirectUri = process.env.SPOTIFY_REDIRECT_URI || 'https://gogesbot.workers.dev/spotify/callback';
+        const redirectUri = process.env.SPOTIFY_REDIRECT_URI || 'https://gogesbot.hx13651954192.workers.dev/spotify/callback';
         
         spotifyApiInstance = new SpotifyWebApi({
             clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -41,16 +37,13 @@ function initializeSpotifyApi() {
             redirectUri: redirectUri
         });
 
-        console.log('Spotify API initialized successfully with OAuth support');
-        console.log(`Redirect URI: ${redirectUri}`);
         return true;
     } catch (error) {
-        console.error('Failed to initialize Spotify API:', error.message);
+        console.error('❌ Failed to initialize Spotify API:', error.message);
         return false;
     }
 }
 
-// OAuth-related functions
 function generateAuthUrl(userId, state = null) {
     if (!spotifyApiInstance) {
         throw new Error('Spotify API not initialized');
@@ -71,9 +64,22 @@ function generateAuthUrl(userId, state = null) {
     ];
     
     const finalState = state || `${userId}_${Date.now()}`;
-    
     const authUrl = spotifyApiInstance.createAuthorizeURL(scopes, finalState, true);
-    console.log(`Generated auth URL for user ${userId}: ${authUrl}`);
+    
+    pendingAuths.set(userId, {
+        state: finalState,
+        timestamp: Date.now(),
+        expires: Date.now() + (10 * 60 * 1000)
+    });
+    
+    setTimeout(() => {
+        if (pendingAuths.has(userId)) {
+            const auth = pendingAuths.get(userId);
+            if (Date.now() > auth.expires) {
+                pendingAuths.delete(userId);
+            }
+        }
+    }, 10 * 60 * 1000);
     
     return { authUrl, state: finalState };
 }
@@ -84,88 +90,153 @@ async function handleAuthCallback(code, state) {
     }
     
     try {
-        console.log('Exchanging authorization code for tokens...');
         const data = await spotifyApiInstance.authorizationCodeGrant(code);
+        const { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn } = data.body;
         
-        const accessToken = data.body.access_token;
-        const refreshToken = data.body.refresh_token;
-        const expiresIn = data.body.expires_in;
-        
-        // Get user ID from state or fetch user profile
-        let userId = state ? state.split('_')[0] : null;
-        
-        if (!userId) {
-            // Create a temporary instance to get user ID
-            const tempApi = new SpotifyWebApi();
-            tempApi.setAccessToken(accessToken);
-            const userProfile = await tempApi.getMe();
-            userId = userProfile.body.id;
+        const discordUserId = state ? state.split('_')[0] : null;
+        if (!discordUserId) {
+            throw new Error('Invalid state parameter - missing Discord user ID');
         }
         
-        // Store user tokens
+        const pendingAuth = pendingAuths.get(discordUserId);
+        if (!pendingAuth || pendingAuth.state !== state) {
+            throw new Error('Invalid authentication - not requested or expired');
+        }
+        
+        pendingAuths.delete(discordUserId);
+        
+        const tempApi = new SpotifyWebApi();
+        tempApi.setAccessToken(accessToken);
+        const userProfile = await tempApi.getMe();
+        
         const tokenData = {
             accessToken,
             refreshToken,
             expiresAt: Date.now() + (expiresIn * 1000),
-            spotifyUserId: userId
+            spotifyUserId: userProfile.body.id,
+            discordUserId: discordUserId,
+            displayName: userProfile.body.display_name,
+            email: userProfile.body.email,
+            product: userProfile.body.product,
+            country: userProfile.body.country,
+            authorizedAt: Date.now()
         };
         
-        userTokens.set(userId, tokenData);
-        scheduleTokenRefresh(userId, expiresIn);
+        userTokens.set(discordUserId, tokenData);
+        scheduleTokenRefresh(discordUserId, expiresIn);
         
-        console.log(`✅ Stored tokens for user ${userId}`);
-        return { success: true, userId, tokenData };
+        console.log(`✅ User authenticated: ${userProfile.body.display_name}`);
+        return { 
+            success: true, 
+            userId: discordUserId, 
+            spotifyUserId: userProfile.body.id,
+            tokenData 
+        };
         
     } catch (error) {
-        console.error('OAuth callback failed:', error.message);
+        console.error('❌ OAuth callback failed:', error.message);
         return { success: false, error: error.message };
     }
 }
 
+// New function to handle manual callback completion
+async function processCallbackFromWorker(discordUserId, code, state) {
+    try {
+        console.log(`🔄 Processing OAuth callback for Discord user: ${discordUserId}`);
+        
+        // Verify the state matches what we expect
+        const pendingAuth = pendingAuths.get(discordUserId);
+        if (!pendingAuth) {
+            throw new Error('No pending authentication found for this user');
+        }
+        
+        if (pendingAuth.state !== state) {
+            throw new Error('State mismatch - possible security issue');
+        }
+        
+        if (Date.now() > pendingAuth.expires) {
+            pendingAuths.delete(discordUserId);
+            throw new Error('Authentication expired - please try again');
+        }
+        
+        // Process the callback
+        const result = await handleAuthCallback(code, state);
+        
+        if (result.success) {
+            console.log(`✅ Manual OAuth completion successful for ${discordUserId}`);
+            return {
+                success: true,
+                userInfo: {
+                    discordUserId: result.userId,
+                    spotifyUserId: result.spotifyUserId,
+                    displayName: result.tokenData.displayName,
+                    product: result.tokenData.product
+                }
+            };
+        } else {
+            return { success: false, error: result.error };
+        }
+        
+    } catch (error) {
+        console.error(`❌ Manual OAuth processing failed: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+// Function to check if user has pending auth
+function hasPendingAuth(userId) {
+    const pending = pendingAuths.get(userId);
+    return pending && Date.now() < pending.expires;
+}
+
+// Function to get auth status for user
+function getAuthStatus(userId) {
+    const userData = userTokens.get(userId);
+    const pendingAuth = pendingAuths.get(userId);
+    
+    return {
+        isAuthenticated: userData && Date.now() < userData.expiresAt,
+        hasPendingAuth: pendingAuth && Date.now() < pendingAuth.expires,
+        userData: userData ? {
+            displayName: userData.displayName,
+            spotifyUserId: userData.spotifyUserId,
+            product: userData.product,
+            authorizedAt: userData.authorizedAt,
+            expiresAt: userData.expiresAt
+        } : null
+    };
+}
+
 function scheduleTokenRefresh(userId, expiresIn) {
-    // Clear existing timer
     if (tokenRefreshTimers.has(userId)) {
         clearTimeout(tokenRefreshTimers.get(userId));
     }
     
-    // Schedule refresh 5 minutes before expiry
-    const refreshTime = (expiresIn - 300) * 1000;
-    const timer = setTimeout(() => {
-        refreshUserToken(userId);
-    }, refreshTime);
-    
+    const refreshTime = (expiresIn - 300) * 1000; 
+    const timer = setTimeout(() => refreshUserToken(userId), refreshTime);
     tokenRefreshTimers.set(userId, timer);
-    console.log(`Scheduled token refresh for user ${userId} in ${refreshTime / 1000}s`);
 }
 
 async function refreshUserToken(userId) {
     const userData = userTokens.get(userId);
-    if (!userData || !userData.refreshToken) {
-        console.log(`No refresh token found for user ${userId}`);
+    if (!userData?.refreshToken) {
         return false;
     }
     
     try {
-        console.log(`Refreshing token for user ${userId}...`);
         spotifyApiInstance.setRefreshToken(userData.refreshToken);
         const data = await spotifyApiInstance.refreshAccessToken();
         
-        const newAccessToken = data.body.access_token;
-        const expiresIn = data.body.expires_in;
-        const newRefreshToken = data.body.refresh_token || userData.refreshToken;
-        
-        userData.accessToken = newAccessToken;
-        userData.refreshToken = newRefreshToken;
-        userData.expiresAt = Date.now() + (expiresIn * 1000);
+        userData.accessToken = data.body.access_token;
+        userData.refreshToken = data.body.refresh_token || userData.refreshToken;
+        userData.expiresAt = Date.now() + (data.body.expires_in * 1000);
         
         userTokens.set(userId, userData);
-        scheduleTokenRefresh(userId, expiresIn);
+        scheduleTokenRefresh(userId, data.body.expires_in);
         
-        console.log(`✅ Refreshed token for user ${userId}`);
         return true;
-        
     } catch (error) {
-        console.error(`Failed to refresh token for user ${userId}:`, error.message);
+        console.error(`❌ Token refresh failed for user ${userId}:`, error.message);
         userTokens.delete(userId);
         return false;
     }
@@ -173,13 +244,9 @@ async function refreshUserToken(userId) {
 
 function getUserApi(userId) {
     const userData = userTokens.get(userId);
-    if (!userData) {
-        return null;
-    }
+    if (!userData) return null;
     
-    // Check if token is expired
     if (Date.now() >= userData.expiresAt) {
-        console.log(`Token expired for user ${userId}, attempting refresh...`);
         refreshUserToken(userId);
         return null;
     }
@@ -204,141 +271,82 @@ function revokeUserAuth(userId) {
         tokenRefreshTimers.delete(userId);
     }
     
-    const removed = userTokens.delete(userId);
-    console.log(`${removed ? 'Revoked' : 'No tokens found for'} user ${userId}`);
-    return removed;
+    // Also clean up any pending auth
+    pendingAuths.delete(userId);
+    
+    return userTokens.delete(userId);
 }
 
-// Enhanced user-specific functions
 async function getUserPlaylists(userId, options = {}) {
     const userApi = getUserApi(userId);
-    if (!userApi) {
-        throw new Error('User not authenticated');
-    }
+    if (!userApi) throw new Error('User not authenticated');
     
-    try {
-        const response = await userApi.getUserPlaylists({ limit: 50, ...options });
-        return response.body.items;
-    } catch (error) {
-        console.error(`Failed to get playlists for user ${userId}:`, error.message);
-        throw error;
-    }
+    const response = await userApi.getUserPlaylists({ limit: 50, ...options });
+    return response.body.items;
 }
 
 async function getUserCurrentPlayback(userId) {
     const userApi = getUserApi(userId);
-    if (!userApi) {
-        throw new Error('User not authenticated');
-    }
+    if (!userApi) throw new Error('User not authenticated');
     
     try {
         const response = await userApi.getMyCurrentPlaybackState();
         return response.body;
     } catch (error) {
-        if (error.statusCode === 204) {
-            return null; // No active device
-        }
-        console.error(`Failed to get playback state for user ${userId}:`, error.message);
+        if (error.statusCode === 204) return null;
         throw error;
     }
 }
 
 async function controlUserPlayback(userId, action, params = {}) {
     const userApi = getUserApi(userId);
-    if (!userApi) {
-        throw new Error('User not authenticated');
-    }
+    if (!userApi) throw new Error('User not authenticated');
     
-    try {
-        switch (action) {
-            case 'play':
-                if (params.uris) {
-                    await userApi.play({ uris: params.uris, device_id: params.deviceId });
-                } else {
-                    await userApi.play({ device_id: params.deviceId });
-                }
-                break;
-            case 'pause':
-                await userApi.pause({ device_id: params.deviceId });
-                break;
-            case 'next':
-                await userApi.skipToNext({ device_id: params.deviceId });
-                break;
-            case 'previous':
-                await userApi.skipToPrevious({ device_id: params.deviceId });
-                break;
-            case 'volume':
-                await userApi.setVolume(params.volume, { device_id: params.deviceId });
-                break;
-            case 'shuffle':
-                await userApi.setShuffle(params.state, { device_id: params.deviceId });
-                break;
-            case 'repeat':
-                await userApi.setRepeat(params.state, { device_id: params.deviceId });
-                break;
-            default:
-                throw new Error(`Unknown playback action: ${action}`);
-        }
-        return true;
-    } catch (error) {
-        console.error(`Playback control failed for user ${userId}:`, error.message);
-        throw error;
-    }
+    const actions = {
+        play: () => params.uris 
+            ? userApi.play({ uris: params.uris, device_id: params.deviceId })
+            : userApi.play({ device_id: params.deviceId }),
+        pause: () => userApi.pause({ device_id: params.deviceId }),
+        next: () => userApi.skipToNext({ device_id: params.deviceId }),
+        previous: () => userApi.skipToPrevious({ device_id: params.deviceId }),
+        volume: () => userApi.setVolume(params.volume, { device_id: params.deviceId }),
+        shuffle: () => userApi.setShuffle(params.state, { device_id: params.deviceId }),
+        repeat: () => userApi.setRepeat(params.state, { device_id: params.deviceId })
+    };
+    
+    const actionFn = actions[action];
+    if (!actionFn) throw new Error(`Unknown playback action: ${action}`);
+    
+    await actionFn();
+    return true;
 }
 
 async function addToUserQueue(userId, uri, deviceId = null) {
     const userApi = getUserApi(userId);
-    if (!userApi) {
-        throw new Error('User not authenticated');
-    }
+    if (!userApi) throw new Error('User not authenticated');
     
-    try {
-        await userApi.addToQueue(uri, { device_id: deviceId });
-        return true;
-    } catch (error) {
-        console.error(`Failed to add to queue for user ${userId}:`, error.message);
-        throw error;
-    }
+    await userApi.addToQueue(uri, { device_id: deviceId });
+    return true;
 }
 
 async function getUserDevices(userId) {
     const userApi = getUserApi(userId);
-    if (!userApi) {
-        throw new Error('User not authenticated');
-    }
+    if (!userApi) throw new Error('User not authenticated');
     
-    try {
-        const response = await userApi.getMyDevices();
-        return response.body.devices;
-    } catch (error) {
-        console.error(`Failed to get devices for user ${userId}:`, error.message);
-        throw error;
-    }
+    const response = await userApi.getMyDevices();
+    return response.body.devices;
 }
 
 function setAccessToken(token) {
     if (spotifyApiInstance) {
         spotifyApiInstance.setAccessToken(token);
-        console.log('🔑 Spotify access token set');
     }
 }
 
 async function searchTracks(query, options = {}) {
-    try {
-        const searchOptions = {
-            limit: 20,
-            ...options
-        };
-        
-        console.log(`🔍 Searching Spotify for: "${query}"`);
-        const response = await spotifyApiInstance.searchTracks(query, searchOptions);
-        
-        console.log(`✅ Found ${response.body.tracks.items.length} tracks`);
-        return response;
-    } catch (error) {
-        console.log(`❌ Spotify search failed: ${error.message}`);
-        throw error;
-    }
+    const searchOptions = { limit: 20, ...options };
+    const response = await spotifyApiInstance.searchTracks(query, searchOptions);
+    return response;
 }
 
 function getSpotifyTrackId(url) {
@@ -365,79 +373,59 @@ async function getSpotifyTrackInfo(trackId) {
             external_url: track.external_urls.spotify
         };
     } catch (error) {
-        console.log(`Failed to get Spotify track info: ${error.message}`);
+        console.error(`❌ Failed to get Spotify track info: ${error.message}`);
         return null;
     }
 }
 
 async function getClientCredentialsToken(retryCount = 0) {
-    if (!spotifyApiInstance) {
-        console.log('Spotify API not initialized');
-        return false;
-    }
+    if (!spotifyApiInstance) return false;
     
     try {
-        console.log('Getting Spotify client credentials token...');
-        
         const response = await spotifyApiInstance.clientCredentialsGrant();
         
-        if (response.body && response.body.access_token) {
+        if (response.body?.access_token) {
             spotifyApiInstance.setAccessToken(response.body.access_token);
-            console.log('Spotify client credentials token set successfully');
             
             const expiresIn = response.body.expires_in || 3600;
-            setTimeout(() => {
-                console.log('Refreshing Spotify client credentials token...');
-                getClientCredentialsToken();
-            }, (expiresIn - 600) * 1000);
+            setTimeout(() => getClientCredentialsToken(), (expiresIn - 600) * 1000);
             
             return true;
         }
     } catch (error) {
-        console.log(`Failed to get client credentials token: ${error.message}`);
-        
-        const isNetworkError = error.message.includes('ECONNRESET') || 
-                              error.message.includes('ENOTFOUND') || 
-                              error.message.includes('ETIMEDOUT') ||
-                              error.message.includes('timeout') ||
-                              error.message.includes('ECONNREFUSED') ||
-                              error.message.includes('socket hang up');
+        const isNetworkError = ['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'timeout', 'ECONNREFUSED', 'socket hang up']
+            .some(err => error.message.includes(err));
         
         if (isNetworkError && retryCount < 3) {
             const delay = Math.min(5000 * Math.pow(2, retryCount), 30000);
-            console.log(`Network connectivity issue detected. Retrying Spotify token request in ${delay/1000}s (attempt ${retryCount + 1}/4)...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             return await getClientCredentialsToken(retryCount + 1);
         }
         
         if (isNetworkError) {
-            console.log('Spotify API appears to be blocked or unstable (possible Great Firewall interference)');
-            console.log('Bot will rely on SoundCloud fallback for music search');
+            console.log('⚠️ Spotify API connectivity issues - using fallback sources');
+        } else {
+            console.error(`❌ Spotify token error: ${error.message}`);
         }
-        
-        return false;
     }
     
     return false;
 }
 
-// Legacy compatibility functions
-async function addToQueue(uri, deviceId) {
-    console.warn('addToQueue: Use addToUserQueue with userId instead');
+async function addToQueue() {
     throw new Error('User authentication required for queue operations');
 }
 
-async function startPlayback(uri, deviceId) {
-    console.warn('startPlayback: Use controlUserPlayback with userId instead');
+async function startPlayback() {
     throw new Error('User authentication required for playback control');
 }
 
 async function getCurrentPlaybackState() {
-    console.warn('getCurrentPlaybackState: Use getUserCurrentPlayback with userId instead');
     throw new Error('User authentication required for playback state');
 }
 
 module.exports = {
+    // Core functions
     initializeSpotifyApi,
     setAccessToken,
     getClientCredentialsToken,
@@ -446,10 +434,13 @@ module.exports = {
     // OAuth functions
     generateAuthUrl,
     handleAuthCallback,
+    processCallbackFromWorker,
     refreshUserToken,
     getUserApi,
     isUserAuthenticated,
     revokeUserAuth,
+    hasPendingAuth,
+    getAuthStatus,
     
     // User-specific functions
     getUserPlaylists,
@@ -458,7 +449,7 @@ module.exports = {
     addToUserQueue,
     getUserDevices,
     
-    // Search functions (public)
+    // Search functions
     searchTracks,
     getSpotifyTrackId,
     isSpotifyUrl,
