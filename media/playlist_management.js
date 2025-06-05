@@ -1,11 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { musicPageRank } = require('./musicPageRank');
 
 const playlistsFilePath = path.join(__dirname, '../../playlists.json');
 
-/**
- * Loads playlists from the JSON file.
- */
 function loadPlaylists() {
   try {
     if (fs.existsSync(playlistsFilePath)) {
@@ -18,9 +16,6 @@ function loadPlaylists() {
   return {};
 }
 
-/**
- * Saves playlists to the JSON file.
- */
 function savePlaylists(playlists) {
   try {
     const data = JSON.stringify(playlists, null, 2);
@@ -32,9 +27,6 @@ function savePlaylists(playlists) {
   }
 }
 
-/**
- * Creates a new playlist for a guild.
- */
 function createPlaylist(guildId, playlistName) {
   if (!playlistName || playlistName.trim() === '') {
     return { success: false, message: 'Playlist name cannot be empty.' };
@@ -63,14 +55,128 @@ function createPlaylist(guildId, playlistName) {
   }
 }
 
-/**
- * Searches for playlists in a guild.
- */
+function addSongToPlaylist(guildId, playlistName, song) {
+  const playlists = loadPlaylists();
+  
+  if (!playlists[guildId] || !playlists[guildId][playlistName]) {
+    return { success: false, message: `Playlist "${playlistName}" not found.` };
+  }
+  
+  const playlist = playlists[guildId][playlistName];
+  
+  const songId = song.id || song.webpageUrl || `${song.source}_${song.title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '_')}`;
+  
+  playlist.songs.push({
+    ...song,
+    addedAt: new Date().toISOString(),
+    id: songId
+  });
+  
+  if (playlist.songs.length > 1) {
+    try {
+      const songIds = playlist.songs.map(s => s.id);
+      musicPageRank.recordPlaylistCooccurrence(songIds, {
+        playlistName,
+        guildId,
+        songCount: playlist.songs.length
+      });
+      console.log(`[PlaylistManager] Recorded PageRank relationships for playlist "${playlistName}" with ${songIds.length} songs`);
+    } catch (error) {
+      console.error('[PlaylistManager] PageRank recording failed:', error.message);
+    }
+  }
+  
+  if (savePlaylists(playlists)) {
+    return { 
+      success: true, 
+      message: `Added "${song.title}" to playlist "${playlistName}"!`,
+      songCount: playlist.songs.length
+    };
+  } else {
+    return { success: false, message: 'Error saving playlist.' };
+  }
+}
+
+function getPlaylistWithRecommendations(guildId, playlistName) {
+  const playlists = loadPlaylists();
+  
+  if (!playlists[guildId] || !playlists[guildId][playlistName]) {
+    return { success: false, message: `Playlist "${playlistName}" not found.` };
+  }
+  
+  const playlist = playlists[guildId][playlistName];
+  
+  const songsWithScores = playlist.songs.map(song => {
+    const pageRankScore = musicPageRank.getSongScore(song.id);
+    return {
+      ...song,
+      pageRankScore,
+      isPopular: pageRankScore > 0.001 
+    };
+  });
+  
+  songsWithScores.sort((a, b) => (b.pageRankScore || 0) - (a.pageRankScore || 0));
+  
+  return {
+    success: true,
+    playlist: {
+      ...playlist,
+      songs: songsWithScores
+    },
+    recommendations: getPlaylistRecommendations(songsWithScores)
+  };
+}
+
+function getPlaylistRecommendations(playlistSongs) {
+  if (playlistSongs.length === 0) return [];
+  
+  try {
+    const songIds = playlistSongs.map(s => s.id);
+    const stats = musicPageRank.getGraphStats();
+    
+    const recommendations = stats.topSongs
+      .filter(song => !songIds.includes(song.songId))
+      .slice(0, 3)
+      .map(song => ({
+        title: song.metadata?.title || 'Unknown',
+        score: parseFloat(song.score),
+        source: song.metadata?.source || 'Unknown'
+      }));
+    
+    return recommendations;
+  } catch (error) {
+    console.error('[PlaylistManager] Recommendation generation failed:', error.message);
+    return [];
+  }
+}
+
+function recordPlaylistPlaySession(guildId, playlistName) {
+  const playlists = loadPlaylists();
+  
+  if (!playlists[guildId] || !playlists[guildId][playlistName]) {
+    return false;
+  }
+  
+  const playlist = playlists[guildId][playlistName];
+  
+  if (playlist.songs.length > 1) {
+    try {
+      const songIds = playlist.songs.map(s => s.id);
+      musicPageRank.recordQueueCooccurrence(songIds);
+      console.log(`[PlaylistManager] Recorded play session for playlist "${playlistName}"`);
+      return true;
+    } catch (error) {
+      console.error('[PlaylistManager] Play session recording failed:', error.message);
+    }
+  }
+  
+  return false;
+}
+
 function searchPlaylists(guildId, searchTerm = '') {
   const playlists = loadPlaylists();
   const guildPlaylists = playlists[guildId] || {};
   
-  // If no playlists exist for this guild
   if (Object.keys(guildPlaylists).length === 0) {
     return { 
       success: true, 
@@ -112,9 +218,6 @@ function searchPlaylists(guildId, searchTerm = '') {
   };
 }
 
-/**
- * Formats playlist search results for display.
- */
 function formatPlaylistDisplay(searchResults) {
   if (!searchResults.success) {
     return searchResults.message;
@@ -136,6 +239,9 @@ function formatPlaylistDisplay(searchResults) {
 
 module.exports = {
   createPlaylist,
+  addSongToPlaylist,
+  getPlaylistWithRecommendations,
+  recordPlaylistPlaySession,
   loadPlaylists,
   savePlaylists,
   searchPlaylists,

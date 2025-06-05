@@ -19,6 +19,7 @@ const {
 const { getBestAudioSource } = require('../media/sourceFetcher');
 
 const { aggregateMusicSearch } = require('../media/musicAggregator');
+const { musicPageRank } = require('../media/musicPageRank');
 const { 
     getCurrentPlaybackState, 
     getCurrentlyPlayingTrack,
@@ -76,7 +77,11 @@ module.exports = {
         .addBooleanOption(option =>
           option.setName('spotify_queue')
             .setDescription('Add selected song to your Spotify queue instead')
-            .setRequired(false))),
+            .setRequired(false)))
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('stats')
+        .setDescription('📊 View music popularity and ranking statistics')),
         
   async execute(interaction) {
     const { guildId, member, options, channel } = interaction;
@@ -176,6 +181,9 @@ module.exports = {
           break;
         case 'search':
           await handleSearch(interaction);
+          break;
+        case 'stats':
+          await handleStats(interaction);
           break;
         default:
           await interaction.reply({
@@ -588,7 +596,6 @@ async function handleSearch(interaction) {
       return;
     }
 
-    // Always show selection menu for search command
     await showSearchResults(interaction, searchResults, query, addToSpotifyQueue);
     
   } catch (error) {
@@ -617,7 +624,6 @@ async function handleCurrent(interaction) {
       timestamp: new Date().toISOString()
     };
 
-    // Discord bot status
     if (queue.songs.length > 0 && queue.playing) {
       const currentSong = queue.songs[0];
       embed.fields.push({
@@ -633,7 +639,6 @@ async function handleCurrent(interaction) {
       });
     }
 
-    // Spotify status (if authenticated)
     if (userHasSpotify) {
       try {
         const spotifyPlayback = await getUserCurrentPlayback(userId);
@@ -687,9 +692,6 @@ async function handleCurrent(interaction) {
   }
 }
 
-/**
- * Handle pause command
- */
 async function handlePause(interaction) {
   const guildId = interaction.guildId;
   const queue = getQueue(guildId);
@@ -766,7 +768,7 @@ async function handleSkip(interaction) {
 
   try {
     const currentSong = queue.songs[0];
-    queue.player.stop(); // This will trigger the 'idle' event and advance to next song
+    queue.player.stop();
     
     let message = `⏭️ **Skipped:** ${currentSong.title}`;
     
@@ -788,8 +790,6 @@ async function handlePrevious(interaction) {
   
   await interaction.deferReply({ ephemeral: true });
 
-  // Discord bot doesn't have previous functionality in the queue system
-  // This is a limitation compared to Spotify
   let message = '❌ **Previous Track Not Available**\n\nThe Discord bot queue doesn\'t support going to the previous track.';
   
   const userId = interaction.user.id;
@@ -802,9 +802,6 @@ async function handlePrevious(interaction) {
   await interaction.editReply(message);
 }
 
-/**
- * Format duration from seconds to MM:SS
- */
 function formatDuration(seconds) {
   if (!seconds || isNaN(seconds)) return 'Unknown';
   
@@ -868,5 +865,75 @@ async function handleSpotifyQueueAdd(interaction, query, userId) {
     }
     
     await interaction.editReply(errorMessage);
+  }
+}
+
+async function handleStats(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  
+  try {
+    const stats = musicPageRank.getGraphStats();
+    
+    const embed = {
+      title: '📊 Music Statistics & Rankings',
+      description: 'Based on user listening patterns and song relationships',
+      color: 0x9146FF,
+      fields: [
+        {
+          name: '📈 Graph Overview',
+          value: `• **Songs Tracked:** ${stats.songCount.toLocaleString()}\n• **Relationships:** ${stats.relationshipCount.toLocaleString()}\n• **Last Calculated:** ${stats.lastCalculated}`,
+          inline: false
+        }
+      ],
+      footer: {
+        text: 'Rankings are updated hourly based on user interactions'
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    if (stats.topSongs && stats.topSongs.length > 0) {
+      const topSongsList = stats.topSongs
+        .slice(0, 5)
+        .map((song, index) => {
+          const title = song.metadata?.title || song.songId.substring(0, 50);
+          const score = parseFloat(song.score);
+          const playCount = song.metadata?.playCount || 0;
+          const searchCount = song.metadata?.searchCount || 0;
+          
+          return `**${index + 1}.** ${title}\n` +
+                 `   • Score: ${score.toFixed(4)} | Plays: ${playCount} | Searches: ${searchCount}`;
+        })
+        .join('\n\n');
+      
+      embed.fields.push({
+        name: '🏆 Top Ranked Songs',
+        value: topSongsList || 'No data available',
+        inline: false
+      });
+    }
+    
+    embed.fields.push({
+      name: '🧠 How Rankings Work',
+      value: '• Songs gain rank when played together in queues\n' +
+             '• Playlist co-occurrence builds relationships\n' +
+             '• Search patterns influence scoring\n' +
+             '• Popular songs boost related tracks\n' +
+             '• Based on Google\'s PageRank algorithm',
+      inline: false
+    });
+    
+    if (stats.songCount < 50) {
+      embed.fields.push({
+        name: '💡 Building Better Rankings',
+        value: 'Keep using the music bot! More interactions = better recommendations.',
+        inline: false
+      });
+    }
+    
+    await interaction.editReply({ embeds: [embed] });
+    
+  } catch (error) {
+    console.error('Error in stats command:', error);
+    await interaction.editReply('❌ Error retrieving music statistics.');
   }
 }

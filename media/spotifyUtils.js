@@ -7,22 +7,22 @@ const SpotifyWebApi = require('spotify-web-api-node');
 let spotifyApiInstance = null;
 const userTokens = new Map();
 const tokenRefreshTimers = new Map();
-const pendingAuths = new Map(); // Store pending authentications
+const pendingAuths = new Map();
 
 initializeModule();
 
 async function initializeModule() {
     if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
-        console.log('⚠️ Spotify credentials not found - Spotify features disabled');
+        console.log('[SpotifyUtils] Spotify credentials not found - Spotify features disabled');
         return;
     }
 
     if (initializeSpotifyApi()) {
         const tokenSuccess = await getClientCredentialsToken();
         if (tokenSuccess) {
-            console.log('✅ Spotify API initialized successfully');
+            console.log('[SpotifyUtils] Spotify API initialized successfully');
         } else {
-            console.log('⚠️ Spotify API initialized but token acquisition failed');
+            console.log('[SpotifyUtils] Spotify API initialized but token acquisition failed');
         }
     }
 }
@@ -39,7 +39,7 @@ function initializeSpotifyApi() {
 
         return true;
     } catch (error) {
-        console.error('❌ Failed to initialize Spotify API:', error.message);
+        console.error('[SpotifyUtils] Failed to initialize Spotify API:', error.message);
         return false;
     }
 }
@@ -125,7 +125,7 @@ async function handleAuthCallback(code, state) {
         userTokens.set(discordUserId, tokenData);
         scheduleTokenRefresh(discordUserId, expiresIn);
         
-        console.log(`✅ User authenticated: ${userProfile.body.display_name}`);
+        console.log(`[SpotifyUtils] User authenticated: ${userProfile.body.display_name}`);
         return { 
             success: true, 
             userId: discordUserId, 
@@ -134,17 +134,15 @@ async function handleAuthCallback(code, state) {
         };
         
     } catch (error) {
-        console.error('❌ OAuth callback failed:', error.message);
+        console.error('[SpotifyUtils] OAuth callback failed:', error.message);
         return { success: false, error: error.message };
     }
 }
 
-// New function to handle manual callback completion
 async function processCallbackFromWorker(discordUserId, code, state) {
     try {
-        console.log(`🔄 Processing OAuth callback for Discord user: ${discordUserId}`);
+        console.log(`[SpotifyUtils] Processing OAuth callback for Discord user: ${discordUserId}`);
         
-        // Verify the state matches what we expect
         const pendingAuth = pendingAuths.get(discordUserId);
         if (!pendingAuth) {
             throw new Error('No pending authentication found for this user');
@@ -159,11 +157,10 @@ async function processCallbackFromWorker(discordUserId, code, state) {
             throw new Error('Authentication expired - please try again');
         }
         
-        // Process the callback
         const result = await handleAuthCallback(code, state);
         
         if (result.success) {
-            console.log(`✅ Manual OAuth completion successful for ${discordUserId}`);
+            console.log(`[SpotifyUtils] OAuth completion successful for ${discordUserId}`);
             return {
                 success: true,
                 userInfo: {
@@ -178,18 +175,16 @@ async function processCallbackFromWorker(discordUserId, code, state) {
         }
         
     } catch (error) {
-        console.error(`❌ Manual OAuth processing failed: ${error.message}`);
+        console.error(`[SpotifyUtils] OAuth processing failed: ${error.message}`);
         return { success: false, error: error.message };
     }
 }
 
-// Function to check if user has pending auth
 function hasPendingAuth(userId) {
     const pending = pendingAuths.get(userId);
     return pending && Date.now() < pending.expires;
 }
 
-// Function to get auth status for user
 function getAuthStatus(userId) {
     const userData = userTokens.get(userId);
     const pendingAuth = pendingAuths.get(userId);
@@ -236,7 +231,7 @@ async function refreshUserToken(userId) {
         
         return true;
     } catch (error) {
-        console.error(`❌ Token refresh failed for user ${userId}:`, error.message);
+        console.error(`[SpotifyUtils] Token refresh failed for user ${userId}:`, error.message);
         userTokens.delete(userId);
         return false;
     }
@@ -271,7 +266,6 @@ function revokeUserAuth(userId) {
         tokenRefreshTimers.delete(userId);
     }
     
-    // Also clean up any pending auth
     pendingAuths.delete(userId);
     
     return userTokens.delete(userId);
@@ -373,7 +367,7 @@ async function getSpotifyTrackInfo(trackId) {
             external_url: track.external_urls.spotify
         };
     } catch (error) {
-        console.error(`❌ Failed to get Spotify track info: ${error.message}`);
+        console.error(`[SpotifyUtils] Failed to get Spotify track info: ${error.message}`);
         return null;
     }
 }
@@ -403,9 +397,9 @@ async function getClientCredentialsToken(retryCount = 0) {
         }
         
         if (isNetworkError) {
-            console.log('⚠️ Spotify API connectivity issues - using fallback sources');
+            console.log('[SpotifyUtils] Spotify API connectivity issues - using fallback sources');
         } else {
-            console.error(`❌ Spotify token error: ${error.message}`);
+            console.error(`[SpotifyUtils] Spotify token error: ${error.message}`);
         }
     }
     

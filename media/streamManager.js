@@ -1,6 +1,6 @@
 const { AudioPlayerStatus, createAudioResource, demuxProbe } = require('@discordjs/voice');
 const youtubeDl = require('youtube-dl-exec');
-const { getQueue, queues } = require('./queueManager');
+const { getQueue, queues, recordSongPlay } = require('./queueManager');
 const { isSpotifyUrl } = require('./spotifyUtils');
 const { aggregateMusicSearch } = require('./musicAggregator');
 const { cookieManager } = require('./cookieManager');
@@ -49,9 +49,8 @@ function killYtDlpProcess(processInstance, songTitle = 'N/A', reason = 'general 
   if (processInstance && typeof processInstance.kill === 'function') {
     if (!processInstance.killed) {
       try {
-        console.log(`[DEBUG] Killing yt-dlp process (PID: ${processInstance.pid}) for song "${songTitle}". Reason: ${reason}`);
+        console.log(`[StreamManager] Terminating yt-dlp process (PID: ${processInstance.pid}) for "${songTitle}". Reason: ${reason}`);
         
-        // Untrack process immediately
         untrackProcess(processInstance);
         
         processInstance.kill('SIGTERM');
@@ -60,19 +59,19 @@ function killYtDlpProcess(processInstance, songTitle = 'N/A', reason = 'general 
           if (!processInstance.killed) {
             try {
               processInstance.kill('SIGKILL');
-              console.log(`[DEBUG] Force killed process (PID: ${processInstance.pid}) for "${songTitle}"`);
+              console.log(`[StreamManager] Force terminated process (PID: ${processInstance.pid}) for "${songTitle}"`);
             } catch (killError) {
-              console.log(`[DEBUG] Process (PID: ${processInstance.pid}) for "${songTitle}" already terminated`);
+                              console.log(`[StreamManager] Process (PID: ${processInstance.pid}) for "${songTitle}" already terminated`);
             }
           }
-        }, 500); // Reduced timeout for faster cleanup
+        }, 500);
         
       } catch (e) {
-        console.error(`[DEBUG] Error attempting to kill process for "${songTitle}": ${e.message}`);
+        console.error(`[StreamManager] Error terminating process for "${songTitle}": ${e.message}`);
         untrackProcess(processInstance);
       }
     } else {
-      console.log(`[DEBUG] Process for "${songTitle}" was already killed. Reason for check: ${reason}`);
+      console.log(`[StreamManager] Process for "${songTitle}" was already terminated. Reason for check: ${reason}`);
       untrackProcess(processInstance);
     }
   }
@@ -81,18 +80,16 @@ function killYtDlpProcess(processInstance, songTitle = 'N/A', reason = 'general 
 
 async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = []) {
   const streamStartTime = Date.now();
-  console.log(`[DEBUG] Creating media stream with yt-dlp for: ${webpageUrl} (attempt ${retryCount + 1})`);
+  console.log(`[StreamManager] Creating media stream for: ${webpageUrl} (attempt ${retryCount + 1})`);
   
-  // Process limiting for better resource management
   if (processCount >= MAX_CONCURRENT_PROCESSES) {
-    console.log(`[DEBUG] Too many concurrent processes (${processCount}), waiting...`);
+    console.log(`[StreamManager] Too many concurrent processes (${processCount}), waiting...`);
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    // Clean up old processes
     const now = Date.now();
     for (const [pid, info] of activeProcesses.entries()) {
-      if (now - info.startTime > 30000) { // 30 seconds old
-        console.log(`[DEBUG] Cleaning up old process ${pid} for "${info.songTitle}"`);
+      if (now - info.startTime > 30000) {
+        console.log(`[StreamManager] Cleaning up old process ${pid} for "${info.songTitle}"`);
         killYtDlpProcess(info.process, info.songTitle, 'timeout cleanup');
       }
     }
@@ -109,11 +106,11 @@ async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = [
       noCheckCertificate: true,
       preferFreeFormats: true,
       youtubeSkipDashManifest: true,
-      retries: 3, // Reduced retries for faster failure
+      retries: 3,
       fragmentRetries: 3,
-      bufferSize: '8M', // Reduced buffer size
-      concurrentFragments: 2, // Reduced concurrent fragments
-      socketTimeout: 30 // Reduced timeout
+      bufferSize: '8M',
+      concurrentFragments: 2,
+      socketTimeout: 30
     };
     
     const ytDlpStreamFlags = await cookieManager.getYtDlpFlags(baseFlags);
@@ -134,12 +131,12 @@ async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = [
   }
     
     ytProcess.on('error', (err) => {
-      console.error(`[DEBUG] yt-dlp stream process error during creation:`, err.message);
+      console.error(`[StreamManager] yt-dlp stream process error during creation:`, err.message);
   });
     
     ytProcess.on('exit', (code, signal) => {
     if (code !== 0 && signal !== 'SIGKILL') {
-        console.warn(`[DEBUG] yt-dlp stream process exited unexpectedly with code ${code}, signal ${signal}.`);
+        console.warn(`[StreamManager] yt-dlp stream process exited unexpectedly with code ${code}, signal ${signal}`);
     }
   });
 
@@ -148,24 +145,24 @@ async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = [
       performanceMonitor.recordStreamStart(Date.now() - streamStartTime);
       return { stream, type, process: ytProcess }; 
   } catch (probeError) {
-    console.error("[DEBUG] demuxProbe Error:", probeError.message);
+    console.error("[StreamManager] demuxProbe Error:", probeError.message);
     
     if (probeError.message && (
       probeError.message.includes('SIGKILL') || 
       probeError.message.includes('killed') ||
       probeError.message.includes('ChildProcessError')
     )) {
-      console.log('[DEBUG] Process was terminated (likely intentional), not treating as error');
+      console.log('[StreamManager] Process was terminated (likely intentional), not treating as error');
       throw new Error('Process terminated');
     }
     
     killYtDlpProcess(ytProcess, 'Stream Creation for ' + webpageUrl, 'demuxProbe error');
     
-    if (cookieManager.isBotDetectionError(stderrOutput) && retryCount === 0) {
-      console.log('[DEBUG] Bot detection found in demuxProbe error, attempting cookie refresh...');
-      const refreshSuccess = await cookieManager.handleBotDetection(stderrOutput);
-      if (refreshSuccess) {
-        console.log('[DEBUG] Retrying stream creation after cookie refresh...');
+          if (cookieManager.isBotDetectionError(stderrOutput) && retryCount === 0) {
+        console.log('[StreamManager] Bot detection found in demuxProbe error, attempting cookie refresh...');
+        const refreshSuccess = await cookieManager.handleBotDetection(stderrOutput);
+        if (refreshSuccess) {
+          console.log('[StreamManager] Retrying stream creation after cookie refresh...');
         return await createMediaStream(webpageUrl, retryCount + 1);
       }
     }
@@ -189,35 +186,35 @@ async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = [
     throw probeError;
     }
   } catch (initialError) {
-    console.error(`[DEBUG] Initial stream creation failed: ${initialError.message}`);
+    console.error(`[StreamManager] Initial stream creation failed: ${initialError.message}`);
     
     const fullErrorText = initialError.message + ' ' + stderrOutput;
     if (cookieManager.isBotDetectionError(fullErrorText) && retryCount === 0) {
-      console.log('[DEBUG] Bot detection error detected, trying direct yt-dlp command fallback...');
+      console.log('[StreamManager] Bot detection error detected, trying direct yt-dlp command fallback...');
       
       try {
-        console.log('[DEBUG] Attempting direct yt-dlp stream URL extraction');
+        console.log('[StreamManager] Attempting direct yt-dlp stream URL extraction');
         const directStreamUrl = await cookieManager.getStreamUrlDirect(webpageUrl);
         
         if (directStreamUrl) {
-          console.log('[DEBUG] Got direct stream URL, creating HTTP stream');
+          console.log('[StreamManager] Got direct stream URL, creating HTTP stream');
           const { stream, type } = await createDirectHttpStream(directStreamUrl);
           
           const mockProcess = {
             pid: 'direct-http',
-            kill: () => console.log('[DEBUG] Mock process kill called for direct HTTP stream'),
+            kill: () => console.log('[StreamManager] Mock process kill called for direct HTTP stream'),
             killed: false
           };
           
           return { stream, type, process: mockProcess };
         }
       } catch (directError) {
-        console.log('[DEBUG] Direct yt-dlp command failed:', directError.message);
-        console.log('[DEBUG] Attempting cookie refresh as secondary fallback...');
+        console.log('[StreamManager] Direct yt-dlp command failed:', directError.message);
+        console.log('[StreamManager] Attempting cookie refresh as secondary fallback...');
         
         const refreshSuccess = await cookieManager.handleBotDetection(fullErrorText);
         if (refreshSuccess) {
-          console.log('[DEBUG] Retrying stream creation after cookie refresh...');
+          console.log('[StreamManager] Retrying stream creation after cookie refresh...');
           return await createMediaStream(webpageUrl, retryCount + 1);
         }
       }
@@ -323,7 +320,7 @@ async function createMediaStream(webpageUrl, retryCount = 0, alternativeUrls = [
 async function managePrebuffering(guildId) {
   const queue = getQueue(guildId);
 
-  // Optimize: Only prebuffer if we have enough resources and the queue is stable
+  // Only prebuffer when resources are available and queue is stable
   if (queue.songs.length > 1 && !queue.prebufferPromise && !queue.buffer && 
       queue.playing && processCount < MAX_CONCURRENT_PROCESSES - 1) {
     const nextSong = queue.songs[1];
@@ -332,7 +329,7 @@ async function managePrebuffering(guildId) {
       console.log(`[DEBUG] [Prebuffer] Initiating for: "${nextSong.title}"`);
       queue.prebufferedSongUrl = nextSong.webpageUrl;
       
-      // Add timeout to prebuffering to prevent hanging
+      // Timeout handler to prevent hanging prebuffer operations
       const prebufferTimeout = setTimeout(() => {
         if (queue.prebufferPromise) {
           console.log(`[DEBUG] [Prebuffer] Timeout for "${nextSong.title}"`);
@@ -487,6 +484,8 @@ async function playSong(guildId, interactionOrCtx) {
     if (queue.textChannel) {
       queue.textChannel.send(`🎵 Now playing: **${song.title}** (${song.source})`).catch(console.error);
     }
+    
+    recordSongPlay(guildId, song);
 
     queue.player.removeAllListeners(AudioPlayerStatus.Idle);
     queue.player.removeAllListeners('error');
@@ -510,7 +509,6 @@ async function playSong(guildId, interactionOrCtx) {
     queue.player.on('error', error => {
       console.error(`[DEBUG] AudioPlayer Error for "${song.title}":`, error.message);
       
-      // Check if this is a process termination error (expected)
       if (error.message && (
         error.message.includes('SIGKILL') || 
         error.message.includes('killed') ||
@@ -647,11 +645,6 @@ async function playSong(guildId, interactionOrCtx) {
   }
 }
 
-/**
- * Create a direct HTTP stream from a stream URL
- * @param {string} streamUrl - Direct streaming URL
- * @returns {Promise<{stream: Readable, type: StreamType}>} Stream object
- */
 async function createDirectHttpStream(streamUrl) {
   console.log('[DEBUG] Creating direct HTTP stream from URL');
   

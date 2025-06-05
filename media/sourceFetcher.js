@@ -39,7 +39,7 @@ async function getBestAudioSource(query) {
     
     if (aggregatedResults.length === 0) {
       console.log(`No results found for "${query}" using aggregated search`);
-      return [{ title: query, isError: true, errorMessage: `❌ No results found for "${query}".` }];
+      return [{ title: query, isError: true, errorMessage: `No results found for "${query}".` }];
     }
     
     if (aggregatedResults[0].isError) {
@@ -50,9 +50,8 @@ async function getBestAudioSource(query) {
     console.log(`Found ${aggregatedResults.length} results using aggregated search for "${query}"`);
     console.log(`Best match: "${aggregatedResults[0].title}" (${aggregatedResults[0].source}) with confidence ${aggregatedResults[0].confidence}`);
     
-    // Add alternative URLs from search results if available
     const topResult = aggregatedResults[0];
-    const alternatives = aggregatedResults.slice(1, 4) // Get up to 3 alternatives
+    const alternatives = aggregatedResults.slice(1, 4)
       .filter(result => !result.isError && result.webpageUrl !== topResult.webpageUrl)
       .map(result => result.webpageUrl);
     
@@ -118,7 +117,7 @@ async function getBestAudioSourceLegacy(query) {
 
   if (isSpotifyUrl(query)) {
     const trackId = getSpotifyTrackId(query);
-    if (!trackId) return [{ title: originalQuery, isError: true, errorMessage: '❌ Invalid Spotify URL format.' }];
+    if (!trackId) return [{ title: originalQuery, isError: true, errorMessage: 'Invalid Spotify URL format.' }];
     
     console.log(`Spotify URL detected. Fetching Spotify meta for ID: ${trackId}`);
     spotifyMeta = await getSpotifyTrackInfo(trackId);
@@ -129,7 +128,7 @@ async function getBestAudioSourceLegacy(query) {
       console.log(`Spotify meta found: "${spotifyMeta.title}". Will use this for yt-dlp YouTube search to get video URL: "${ytDlpQuery}"`);
     } else {
       console.warn(`Could not get metadata for Spotify track ID ${trackId}. Cannot proceed with YouTube search.`);
-      return [{ title: originalQuery, isError: true, errorMessage: `❌ Could not fetch metadata for Spotify track ID ${trackId}.` }];
+      return [{ title: originalQuery, isError: true, errorMessage: `Could not fetch metadata for Spotify track ID ${trackId}.` }];
     }
   } else if (isSoundCloudUrl(query)) {
     console.log(`SoundCloud URL detected: ${query}`);
@@ -215,11 +214,11 @@ async function getBestAudioSourceLegacy(query) {
         } catch (e) {
             console.error('Failed to parse metadata JSON from execResult:', e);
             console.error('execResult (metadata) was:', execResult.substring(0, 1000));
-            return [{ title: originalQuery, isError: true, errorMessage: `❌ yt-dlp produced invalid JSON output for metadata.` }];
+            return [{ title: originalQuery, isError: true, errorMessage: `yt-dlp produced invalid JSON output for metadata.` }];
         }
     } else {
         console.error(`yt-dlp (metadata) returned an unexpected structure or empty output. execResult:`, JSON.stringify(execResult).substring(0,1000));
-        return [{ title: originalQuery, isError: true, errorMessage: `❌ yt-dlp returned an unexpected data structure or empty output for metadata.` }];
+        return [{ title: originalQuery, isError: true, errorMessage: `yt-dlp returned an unexpected data structure or empty output for metadata.` }];
     }
 
     let entries = [];
@@ -250,7 +249,7 @@ async function getBestAudioSourceLegacy(query) {
           title: jsonData.title || originalQuery
         });
       } else {
-      return [{ title: originalQuery, isError: true, errorMessage: `❌ No valid video results found for "${originalQuery}".` }];
+      return [{ title: originalQuery, isError: true, errorMessage: `No valid video results found for "${originalQuery}".` }];
       }
     }
 
@@ -281,7 +280,7 @@ async function getBestAudioSourceLegacy(query) {
 
     if (songs.length === 0) {
       console.error(`yt-dlp (metadata) did not return any usable webpage_url from entries for "${originalQuery}".`);
-      return [{ title: originalQuery, isError: true, errorMessage: `❌ yt-dlp could not find required metadata (webpage_url) for "${originalQuery}".` }];
+      return [{ title: originalQuery, isError: true, errorMessage: `yt-dlp could not find required metadata (webpage_url) for "${originalQuery}".` }];
     }
     
     console.log(`Processed ${songs.length} song(s) from yt-dlp metadata for query "${ytDlpQuery}".`);
@@ -303,14 +302,13 @@ async function getBestAudioSourceLegacy(query) {
         try {
             const simpleQuery = originalQuery.replace(/[&+:;,]/g, ' ').replace(/\s+/g, ' ').trim();
             console.log(`Attempting to find video for simplified query: "${simpleQuery}"`);
-            // Let yt-dlp handle the search naturally without hardcoded mappings
-            return [{ title: originalQuery, isError: true, errorMessage: `❌ YouTube search failed - please try again or use a direct YouTube URL.` }];
+            return [{ title: originalQuery, isError: true, errorMessage: `YouTube search failed - please try again or use a direct YouTube URL.` }];
         } catch (fallbackError) {
             console.error('Error in direct fallback:', fallbackError.message);
         }
     }
     
-    return [{ title: originalQuery, isError: true, errorMessage: `❌ Error executing yt-dlp for metadata for "${originalQuery}".` }];
+    return [{ title: originalQuery, isError: true, errorMessage: `Error executing yt-dlp for metadata for "${originalQuery}".` }];
   }
 }
 
@@ -320,7 +318,6 @@ async function getBestAudioSourceLegacy(query) {
  * @returns {string|null} - YouTube video ID if found, null otherwise
  */
 function getDirectVideoIdMatch(query) {
-    // Removed hardcoded mappings - let yt-dlp handle search properly
     return null;
 }
 

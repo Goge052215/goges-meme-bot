@@ -10,6 +10,8 @@ const {
 const { isSoundCloudUrl, isYouTubeUrl } = require('./urlUtils');
 const { cookieManager } = require('./cookieManager');
 const { performanceMonitor } = require('./performanceMonitor');
+const { musicPageRank } = require('./musicPageRank');
+const { spotifyPageRankIntegration } = require('./spotifyPageRankIntegration');
 const youtubeDl = require('youtube-dl-exec');
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +31,6 @@ function formatDuration(seconds) {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-// Performance optimizations: Caching system
 const searchCache = new Map();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 const MAX_CACHE_SIZE = 500;
@@ -59,7 +60,7 @@ function getCacheKey(query, sources, maxResults) {
 function getCachedResult(cacheKey) {
     const cached = searchCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`🎯 Cache hit for search: ${cacheKey.split(':')[0]}`);
+        console.log(`[MusicAggregator] Cache hit for search: ${cacheKey.split(':')[0]}`);
         performanceMonitor.recordCacheHit();
         return cached.results;
     }
@@ -79,7 +80,7 @@ class AggregatedSearchResult {
         this.title = title;
         this.webpageUrl = url;
         this.duration = formatDuration(duration);
-        this.durationSeconds = duration; // Keep raw seconds for calculations
+        this.durationSeconds = duration;
         this.thumbnail = thumbnail;
         this.source = source;
         this.originalQuery = originalQuery;
@@ -111,49 +112,49 @@ class AggregatedSearchResult {
 
     async playOnSpotify(deviceId = null) {
         if (!this.canPlayDirectly || !this.spotifyUri) {
-            console.log(`❌ Cannot play "${this.title}" directly on Spotify - no URI available`);
+            console.log(`[AggregatedSearchResult] Cannot play "${this.title}" directly on Spotify - no URI available`);
             return false;
         }
 
         try {
-            console.log(`🎵 Playing "${this.title}" directly on Spotify...`);
+            console.log(`[AggregatedSearchResult] Playing "${this.title}" directly on Spotify...`);
             const success = await startPlayback(this.spotifyUri, deviceId);
             
             if (success) {
-                console.log(`✅ Now playing on Spotify: ${this.title}`);
+                console.log(`[AggregatedSearchResult] Now playing on Spotify: ${this.title}`);
             }
             
             return success;
         } catch (error) {
-            console.log(`❌ Failed to play on Spotify: ${error.message}`);
+            console.log(`[AggregatedSearchResult] Failed to play on Spotify: ${error.message}`);
             return false;
         }
     }
 
     async addToSpotifyQueue(deviceId = null) {
         if (!this.canPlayDirectly || !this.spotifyUri) {
-            console.log(`❌ Cannot add "${this.title}" to Spotify queue - no URI available`);
+            console.log(`[AggregatedSearchResult] Cannot add "${this.title}" to Spotify queue - no URI available`);
             return false;
         }
 
         try {
-            console.log(`🎵 Adding "${this.title}" to Spotify queue...`);
+            console.log(`[AggregatedSearchResult] Adding "${this.title}" to Spotify queue...`);
             const success = await addToQueue(this.spotifyUri, deviceId);
             
             if (success) {
-                console.log(`✅ Added to Spotify queue: ${this.title}`);
+                console.log(`[AggregatedSearchResult] Added to Spotify queue: ${this.title}`);
             }
             
             return success;
         } catch (error) {
-            console.log(`❌ Failed to add to Spotify queue: ${error.message}`);
+            console.log(`[AggregatedSearchResult] Failed to add to Spotify queue: ${error.message}`);
             return false;
         }
     }
 
     async playDirectly(options = {}) {
         if (!this.canPlayDirectly) {
-            console.log(`❌ Cannot play "${this.title}" directly - no playable source available`);
+            console.log(`[AggregatedSearchResult] Cannot play "${this.title}" directly - no playable source available`);
             return false;
         }
 
@@ -162,7 +163,7 @@ class AggregatedSearchResult {
         }
 
         if (this.webpageUrl) {
-            console.log(`🎵 Starting stream for "${this.title}" from ${this.source}...`);
+            console.log(`[AggregatedSearchResult] Starting stream for "${this.title}" from ${this.source}...`);
             
             return {
                 type: 'stream',
@@ -202,7 +203,6 @@ async function aggregateMusicSearch(query, options = {}) {
         ...options
     };
 
-    // Check cache first for non-URL queries
     if (!isSpotifyUrl(query) && !isSoundCloudUrl(query) && !isYouTubeUrl(query)) {
         const cacheKey = getCacheKey(query, opts.sources, opts.maxResults);
         const cachedResult = getCachedResult(cacheKey);
@@ -212,14 +212,14 @@ async function aggregateMusicSearch(query, options = {}) {
         }
     }
 
-    console.log(`🎵 Spotify-focused search for "${query}"`);
+    console.log(`[MusicAggregator] Initiating Spotify-focused search for: ${query}`);
 
     if (isSpotifyUrl(query)) {
         return await getSpotifyDirectResults(query, originalQuery);
     } else if (isSoundCloudUrl(query)) {
         return await getSoundCloudDirectResults(query, originalQuery);
     } else if (isYouTubeUrl(query)) {
-        console.log('🔄 Converting YouTube URL to Spotify search...');
+        console.log('[MusicAggregator] Converting YouTube URL to Spotify search equivalent');
         const convertedQuery = await convertYouTubeUrlToQuery(query);
         return await aggregateMusicSearch(convertedQuery || query, options);
     }
@@ -227,12 +227,11 @@ async function aggregateMusicSearch(query, options = {}) {
     const searchPromises = [];
     let spotifyFailed = false;
     
-    // Optimize: Run searches in parallel but prioritize Spotify
     if (opts.sources.includes('spotify')) {
         const spotifyPromise = searchWithTimeout(searchSpotify(query, originalQuery), opts.sourceTimeout, 'Spotify')
             .catch(error => {
                 if (error.message.includes('timeout') || error.message.includes('ECONNRESET')) {
-                    console.log('🚧 Spotify connectivity issues detected, prioritizing SoundCloud');
+                    console.log('[MusicAggregator] Spotify connectivity issues detected, prioritizing SoundCloud');
                     spotifyFailed = true;
                 }
                 return [];
@@ -267,12 +266,11 @@ async function aggregateMusicSearch(query, options = {}) {
     if (allResults.length === 0) {
         console.log('No results from Spotify or SoundCloud, trying enhanced search...');
         
-        // Skip enhanced Spotify search if we detected connectivity issues
         if (!spotifyFailed) {
             try {
                 const enhancedResults = await getEnhancedSpotifySearch(originalQuery);
                 if (enhancedResults && enhancedResults.length > 0) {
-                    console.log(`✅ Enhanced Spotify search found ${enhancedResults.length} results`);
+                    console.log(`[MusicAggregator] Enhanced Spotify search found ${enhancedResults.length} results`);
                     return enhancedResults;
                 }
             } catch (fallbackError) {
@@ -281,12 +279,11 @@ async function aggregateMusicSearch(query, options = {}) {
             }
         }
         
-        // Try direct metadata search with emphasis on SoundCloud for China
         try {
-            console.log('🔍 Trying direct metadata search as final fallback...');
+            console.log('[MusicAggregator] Trying direct metadata search as final fallback...');
             const directResults = await getDirectMetadataSearch(originalQuery, spotifyFailed);
             if (directResults && directResults.length > 0) {
-                console.log(`✅ Direct metadata search found ${directResults.length} results`);
+                console.log(`[MusicAggregator] Direct metadata search found ${directResults.length} results`);
                 return directResults;
             }
         } catch (directError) {
@@ -294,13 +291,12 @@ async function aggregateMusicSearch(query, options = {}) {
         }
         
         const errorMessage = spotifyFailed 
-            ? `❌ No results found for "${originalQuery}". Spotify appears to be blocked or unstable in your region.`
-            : `❌ No results found for "${originalQuery}" on any source.`;
+            ? `No results found for "${originalQuery}". Spotify appears to be blocked or unstable in your region.`
+            : `No results found for "${originalQuery}" on any source.`;
             
         return [AggregatedSearchResult.createError(originalQuery, errorMessage)];
     }
     
-    // Optimize: More efficient sorting and result processing
     const sortedResults = allResults
         .filter(result => !result.isError)
         .sort((a, b) => {
@@ -312,16 +308,77 @@ async function aggregateMusicSearch(query, options = {}) {
         })
         .slice(0, opts.maxResults);
     
-    console.log(`✅ Found ${sortedResults.length} results for "${originalQuery}"`);
+    console.log(`[MusicAggregator] Found ${sortedResults.length} results for query: ${originalQuery}`);
     
-    // Cache successful results
+    let enhancedResults;
+    
+    const spotifyResults = sortedResults.filter(r => r.source.includes('Spotify'));
+    const nonSpotifyResults = sortedResults.filter(r => !r.source.includes('Spotify'));
+    
+    if (spotifyResults.length > 0) {
+        console.log(`[MusicAggregator] Applying Spotify-specific PageRank enhancement to ${spotifyResults.length} results`);
+        const spotifyEnhanced = await spotifyPageRankIntegration.enhanceSpotifySearchResults(
+            originalQuery, 
+            spotifyResults.map(r => ({
+                id: r.id,
+                name: r.title.split(' - ')[0] || r.title,
+                artists: [{ name: r.title.split(' - ')[1] || 'Unknown' }],
+                popularity: Math.max(0, r.confidence - 100),
+                uri: r.spotifyUri,
+                external_urls: { spotify: r.webpageUrl },
+                duration_ms: (r.durationSeconds || 0) * 1000,
+                album: { name: '', images: [{ url: r.thumbnail }] }
+            })),
+            options.userContext || {}
+        );
+        
+        enhancedResults = spotifyEnhanced.map(track => {
+            const originalResult = spotifyResults.find(r => r.id === track.id) || spotifyResults[0];
+            return new AggregatedSearchResult(
+                track.name + (track.artists?.[0]?.name ? ` - ${track.artists[0].name}` : ''),
+                originalResult.webpageUrl,
+                originalResult.durationSeconds,
+                originalResult.thumbnail,
+                originalResult.source + (track.pageRankBoost > 10 ? ' (★ Enhanced)' : ''),
+                originalQuery,
+                originalResult.id,
+                track.confidence,
+                originalResult.spotifyUri
+            );
+        });
+        
+        console.log(`[MusicAggregator] Spotify PageRank enhanced: ${enhancedResults.filter(r => r.confidence > 200).length}/${enhancedResults.length} highly boosted`);
+    } else {
+        enhancedResults = [];
+    }
+    
+    // Apply general PageRank to non-Spotify results
+    if (nonSpotifyResults.length > 0) {
+        const generalEnhanced = musicPageRank.enhanceSearchResults(nonSpotifyResults);
+        enhancedResults = [...enhancedResults, ...generalEnhanced];
+    }
+    
+    const finalResults = enhancedResults
+        .filter(result => !result.isError)
+        .sort((a, b) => {
+            const aSpotify = a.source.includes('Spotify');
+            const bSpotify = b.source.includes('Spotify');
+            if (aSpotify && !bSpotify) return -1;
+            if (!aSpotify && bSpotify) return 1;
+            return b.confidence - a.confidence;
+        })
+        .slice(0, opts.maxResults);
+    
+    const enhancedCount = finalResults.filter(r => r.source.includes('Enhanced') || r.pageRankBoost > 0).length;
+    console.log(`[MusicAggregator] PageRank enhanced results: ${enhancedCount}/${finalResults.length} boosted`);
+    
     if (!isSpotifyUrl(originalQuery) && !isSoundCloudUrl(originalQuery) && !isYouTubeUrl(originalQuery)) {
         const cacheKey = getCacheKey(originalQuery, opts.sources, opts.maxResults);
-        setTimeout(() => setCachedResult(cacheKey, sortedResults), 0);
+        setTimeout(() => setCachedResult(cacheKey, finalResults), 0);
     }
     
     performanceMonitor.recordSearchTime(Date.now() - startTime);
-    return sortedResults;
+    return finalResults;
 }
 
 async function searchWithTimeout(promise, timeoutMs, sourceName) {
@@ -352,7 +409,7 @@ async function searchSpotify(query, originalQuery) {
     
     try {
         await spotifyInstance.getMe();
-        console.log(`🎵 Searching Spotify for "${query}"`);
+        console.log(`[MusicAggregator] Searching Spotify for query: ${query}`);
     } catch (tokenError) {
         if (tokenError.message.includes('ECONNRESET') || 
             tokenError.message.includes('ENOTFOUND') || 
@@ -376,9 +433,9 @@ async function searchSpotify(query, originalQuery) {
             return [];
         }
         
-        console.log(`✅ Found ${spotifyResults.body.tracks.items.length} Spotify results`);
+        console.log(`[MusicAggregator] Found ${spotifyResults.body.tracks.items.length} Spotify results`);
         
-        return spotifyResults.body.tracks.items.map((track, index) => {
+        const results = spotifyResults.body.tracks.items.map((track, index) => {
             const artists = track.artists.map(a => a.name).join(', ');
             const title = `${track.name} - ${artists}`;
             
@@ -393,6 +450,15 @@ async function searchSpotify(query, originalQuery) {
                 confidence += 15;
             }
             
+            // Record track for PageRank learning (async, non-blocking)
+            setTimeout(() => {
+                spotifyPageRankIntegration.recordSpotifyTrack(track, {
+                    searchQuery: query,
+                    resultPosition: index,
+                    searchTimestamp: Date.now()
+                });
+            }, 0);
+            
             return new AggregatedSearchResult(
                 title,
                 track.external_urls.spotify,
@@ -405,6 +471,13 @@ async function searchSpotify(query, originalQuery) {
                 track.uri
             );
         });
+        
+        // Record search pattern for PageRank (async, non-blocking)
+        setTimeout(() => {
+            spotifyPageRankIntegration.recordSpotifySearchPattern(query, spotifyResults.body.tracks.items);
+        }, 0);
+        
+        return results;
     } catch (error) {
         console.log(`Spotify search error: ${error.message}`);
         return [];
@@ -413,7 +486,7 @@ async function searchSpotify(query, originalQuery) {
 
 async function searchSoundCloud(query, originalQuery) {
     try {
-        console.log(`🔊 Searching SoundCloud for "${query}" (fallback)`);
+        console.log(`[MusicAggregator] Searching SoundCloud for query: ${query} (fallback)`);
         
         const cleanQuery = query.replace(/[&+:;,]/g, ' ').replace(/\s+/g, ' ').trim();
         const searchQueries = [
@@ -438,7 +511,7 @@ async function searchSoundCloud(query, originalQuery) {
         
         for (const searchQuery of searchQueries) {
             try {
-                console.log(`🔍 Trying SoundCloud search: "${searchQuery}"`);
+                console.log(`[MusicAggregator] Trying SoundCloud search: ${searchQuery}`);
                 const scFlags = await cookieManager.getYtDlpFlags(baseScFlags);
                 
                 const execPromise = youtubeDl(searchQuery, scFlags);
@@ -477,7 +550,7 @@ async function searchSoundCloud(query, originalQuery) {
                     continue;
                 }
                 
-                console.log(`✅ Found ${entries.length} SoundCloud results with "${searchQuery}"`);
+                console.log(`[MusicAggregator] Found ${entries.length} SoundCloud results with query: ${searchQuery}`);
                 
                 const results = entries
                     .filter(entry => entry.webpage_url || entry.url)
@@ -530,7 +603,7 @@ async function searchSoundCloud(query, originalQuery) {
  */
 async function getSpotifyDirectResults(url, originalQuery) {
     try {
-        console.log(`🎵 Processing direct Spotify URL: ${url}`);
+        console.log(`[MusicAggregator] Processing direct Spotify URL: ${url}`);
         
         const spotifyInstance = spotifyApiInstance();
         if (!spotifyInstance) {
@@ -571,7 +644,7 @@ async function getSpotifyDirectResults(url, originalQuery) {
         
     } catch (error) {
         return [AggregatedSearchResult.createError(
-            originalQuery, `❌ Error processing Spotify URL: ${error.message}`
+            originalQuery, `Error processing Spotify URL: ${error.message}`
         )];
     }
 }
@@ -581,7 +654,7 @@ async function getSpotifyDirectResults(url, originalQuery) {
  */
 async function getSoundCloudDirectResults(url, originalQuery) {
     try {
-        console.log(`🔊 Processing direct SoundCloud URL: ${url}`);
+        console.log(`[MusicAggregator] Processing direct SoundCloud URL: ${url}`);
         
         const baseScFlags = {
             dumpSingleJson: true,
@@ -616,16 +689,13 @@ async function getSoundCloudDirectResults(url, originalQuery) {
         )];
     } catch (error) {
         return [AggregatedSearchResult.createError(
-            originalQuery, `❌ Error processing SoundCloud URL: ${error.message}`
+            originalQuery, `Error processing SoundCloud URL: ${error.message}`
         )];
     }
 }
 
-/**
- * Enhanced Spotify search with fuzzy matching and alternatives
- */
 async function getEnhancedSpotifySearch(query) {
-    console.log(`🔍 Enhanced Spotify search for "${query}"`);
+    console.log(`[MusicAggregator] Enhanced Spotify search for query: ${query}`);
     
     const spotifyInstance = spotifyApiInstance();
     if (!spotifyInstance) {
@@ -635,7 +705,7 @@ async function getEnhancedSpotifySearch(query) {
     
     try {
         await spotifyInstance.getMe();
-        console.log('✅ Spotify API configured for enhanced search');
+        console.log('[MusicAggregator] Spotify API configured for enhanced search');
     } catch (tokenError) {
         console.log('Spotify API not configured for enhanced search (missing/invalid token)');
         return [];
@@ -650,30 +720,27 @@ async function getEnhancedSpotifySearch(query) {
     
     for (const variation of searchVariations) {
         try {
-            console.log(`🎯 Trying Spotify search variation: "${variation}"`);
+            console.log(`[MusicAggregator] Trying Spotify search variation: ${variation}`);
             const results = await searchSpotify(variation, query);
             if (results && results.length > 0) {
-                console.log(`✅ Found ${results.length} results with variation: "${variation}"`);
+                console.log(`[MusicAggregator] Found ${results.length} results with variation: ${variation}`);
                 return results;
             }
         } catch (error) {
-            console.log(`❌ Spotify variation failed: ${error.message}`);
+            console.log(`[MusicAggregator] Spotify variation failed: ${error.message}`);
         }
     }
     
     return [];
 }
 
-/**
- * Convert YouTube URL to searchable query by extracting video title
- */
 async function convertYouTubeUrlToQuery(youtubeUrl) {
     try {
-        console.log(`🔄 Converting YouTube URL: ${youtubeUrl}`);
+        console.log(`[MusicAggregator] Converting YouTube URL: ${youtubeUrl}`);
         
         const videoId = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/)?.[1];
         if (!videoId) {
-            console.log('❌ Could not extract video ID from YouTube URL');
+            console.log('[MusicAggregator] Could not extract video ID from YouTube URL');
             return null;
         }
         
@@ -691,24 +758,21 @@ async function convertYouTubeUrlToQuery(youtubeUrl) {
                     .replace(/[^\w\s-]/g, '')
                     .trim();
                 
-                console.log(`✅ Converted YouTube URL to query: "${cleanTitle}"`);
+                console.log(`[MusicAggregator] Converted YouTube URL to query: ${cleanTitle}`);
                 return cleanTitle;
             }
         } catch (ytError) {
-            console.log(`❌ Could not extract title from YouTube: ${ytError.message}`);
+            console.log(`[MusicAggregator] Could not extract title from YouTube: ${ytError.message}`);
         }
         
         return `video ${videoId}`;
         
     } catch (error) {
-        console.log(`❌ YouTube URL conversion failed: ${error.message}`);
+        console.log(`[MusicAggregator] YouTube URL conversion failed: ${error.message}`);
         return null;
     }
 }
 
-/**
- * Helper to capitalize words in a string
- */
 function capitalizeWords(str) {
     return str
         .split(' ')
@@ -716,12 +780,8 @@ function capitalizeWords(str) {
         .join(' ');
 }
 
-/**
- * Direct metadata search as final fallback
- * Tries multiple search approaches when primary sources fail
- */
 async function getDirectMetadataSearch(query, spotifyFailed = false) {
-    console.log(`🔍 Direct metadata search for "${query}"`);
+    console.log(`[MusicAggregator] Direct metadata search for: ${query}`);
     
     const cleanQuery = query.replace(/[&+:;,]/g, ' ').replace(/\s+/g, ' ').trim();
     
@@ -738,12 +798,12 @@ async function getDirectMetadataSearch(query, spotifyFailed = false) {
     ];
     
     if (spotifyFailed) {
-        console.log('🎵 Prioritizing SoundCloud due to Spotify connectivity issues');
+        console.log('[MusicAggregator] Prioritizing SoundCloud due to Spotify connectivity issues');
     }
     
     for (const searchAttempt of searchAttempts) {
         try {
-            console.log(`🔍 Trying direct search: "${searchAttempt}"`);
+            console.log(`[MusicAggregator] Trying direct search: ${searchAttempt}`);
             
             const baseFlags = {
                 dumpSingleJson: true,
@@ -796,7 +856,7 @@ async function getDirectMetadataSearch(query, spotifyFailed = false) {
                 continue;
             }
             
-            console.log(`✅ Found ${entries.length} results from direct search`);
+            console.log(`[MusicAggregator] Found ${entries.length} results from direct search`);
             
             const results = entries
                 .filter(entry => entry.webpage_url || entry.url)
