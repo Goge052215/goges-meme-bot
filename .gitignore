@@ -45,3 +45,6 @@ jspm_packages/
 # Private web interface - keep separate from version control
 cloudflare-worker.js
 *.worker.js 
+
+# Application Zip
+goges_memebot.zip
