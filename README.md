@@ -1,4 +1,4 @@
-# Discord Everything Bot with AI Intelligence
+# Discord Everything Bot
 
 A comprehensive Discord bot offering music streaming, weather information, entertainment features, and utilities. Features advanced AI-powered PageRank recommendations, Spotify OAuth integration, and intelligent multi-source content aggregation.
 
