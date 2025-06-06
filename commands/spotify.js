@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { 
     generateAuthUrl, 
     isUserAuthenticated, 
@@ -10,24 +10,25 @@ const {
     addToUserQueue,
     getSpotifyTrackId,
     isSpotifyUrl
-} = require('../media/spotifyUtils');
+} = require('../worker-kv-interface');
+const spotifyUtils = require('../media/spotifyUtils');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('spotify')
-        .setDescription('Enhanced Spotify integration with OAuth')
+        .setDescription('Spotify integration commands')
         .addSubcommand(subcommand =>
             subcommand
                 .setName('login')
-                .setDescription('Connect your Spotify account for enhanced features'))
+                .setDescription('Connect your Spotify account to the bot'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('logout')
-                .setDescription('Disconnect your Spotify account'))
+                .setDescription('Disconnect your Spotify account from the bot'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('status')
-                .setDescription('Check your Spotify connection and current playback'))
+                .setDescription('Check your Spotify connection status and current playback'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('control')
@@ -40,8 +41,8 @@ module.exports = {
                         .addChoices(
                             { name: 'Play', value: 'play' },
                             { name: 'Pause', value: 'pause' },
-                            { name: 'Next Track', value: 'next' },
-                            { name: 'Previous Track', value: 'previous' },
+                            { name: 'Skip to Next', value: 'next' },
+                            { name: 'Skip to Previous', value: 'previous' },
                             { name: 'Toggle Shuffle', value: 'shuffle' }
                         ))
                 .addIntegerOption(option =>
@@ -49,7 +50,17 @@ module.exports = {
                         .setName('volume')
                         .setDescription('Set volume (0-100)')
                         .setMinValue(0)
-                        .setMaxValue(100)))
+                        .setMaxValue(100))
+                .addStringOption(option =>
+                    option
+                        .setName('device')
+                        .setDescription('Device ID to control (leave empty for current device)')
+                )
+                .addBooleanOption(option =>
+                    option
+                        .setName('shuffle_state')
+                        .setDescription('Shuffle state (on/off)')
+                ))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('devices')
@@ -63,7 +74,13 @@ module.exports = {
                         .setName('limit')
                         .setDescription('Number of playlists to show (default: 10)')
                         .setMinValue(1)
-                        .setMaxValue(20)))
+                        .setMaxValue(25))
+                .addIntegerOption(option =>
+                    option
+                        .setName('offset')
+                        .setDescription('Offset for pagination')
+                        .setMinValue(0)
+                ))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('queue')
@@ -71,8 +88,14 @@ module.exports = {
                 .addStringOption(option =>
                     option
                         .setName('song')
-                        .setDescription('Song name or Spotify URL to add to queue')
-                        .setRequired(true))),
+                        .setDescription('Song name or Spotify URL')
+                        .setRequired(true))
+                .addStringOption(option =>
+                    option
+                        .setName('device')
+                        .setDescription('Device ID to use (leave empty for current device)')
+                )
+        ),
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -111,8 +134,8 @@ module.exports = {
             console.error(`Error in spotify command (${subcommand}):`, error);
             
             const errorMessage = error.message.includes('User not authenticated')
-                ? '🔐 **Authentication Required**\n\nYou need to connect your Spotify account first. Use `/spotify login` to get started!\n\n🌐 **Need Help?** Visit our [Setup Guide](https://gogesbot.workers.dev/spotify/guide) for step-by-step instructions.'
-                : `❌ **Error:** ${error.message}\n\n🆘 **Troubleshooting:** Check our [Help Page](https://gogesbot.workers.dev/spotify/help) for common solutions.`;
+                ? '🔐 **Authentication Required**\n\nYou need to connect your Spotify account first. Use `/spotify login` to get started!\n\n🌐 **Need Help?** Visit our [Setup Guide](https://gogesmemebot.gogebot.art/spotify/guide) for step-by-step instructions.'
+                : `❌ **Error:** ${error.message}\n\n🆘 **Troubleshooting:** Check our [Help Page](https://gogesmemebot.gogebot.art/spotify/help) for common solutions.`;
             
             const replyOptions = { content: errorMessage, ephemeral: true };
             
@@ -132,74 +155,117 @@ module.exports = {
 };
 
 async function handleLogin(interaction, userId) {
-    if (isUserAuthenticated(userId)) {
-        await interaction.reply({
-            content: '✅ **Already Connected**\n\nYour Spotify account is already connected! Use `/spotify status` to see your current playback.',
-            ephemeral: true
-        });
-        return;
-    }
-
     try {
-        const { authUrl, state } = generateAuthUrl(userId);
+        await interaction.deferReply({ ephemeral: true });
         
-        const embed = {
-            title: '🎵 Connect Your Spotify Account',
-            description: 'Click the link below to connect your Spotify account and unlock enhanced features!',
-            color: 0x1DB954,
-            fields: [
-                {
-                    name: '🔗 Authentication Link',
-                    value: `[Click here to connect to Spotify](${authUrl})`,
-                    inline: false
-                },
-                {
-                    name: '✨ What you\'ll get:',
-                    value: [
-                        '• Control playback from Discord',
-                        '• Access your personal playlists',
-                        '• Add songs to your Spotify queue',
-                        '• Manage devices and volume',
-                        '• View current playing track'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '📝 Instructions:',
-                    value: [
-                        '1. Click the authentication link above',
-                        '2. Log in to Spotify and grant permissions',
-                        '3. Return here and use `/spotify status` to verify',
-                        '4. Start using enhanced Spotify features!'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '🌐 Need Help?',
-                    value: 'Visit our [Setup Guide](https://gogesbot.workers.dev/spotify/guide) or [Troubleshooting](https://gogesbot.workers.dev/spotify/help) page for detailed instructions.',
-                    inline: false
-                }
-            ],
-            footer: {
-                text: 'Your authentication session will expire in 10 minutes if not completed.'
-            },
-            timestamp: new Date().toISOString()
-        };
+        // Check if user is already authenticated
+        if (await isUserAuthenticated(userId)) {
+            return interaction.editReply({
+                content: '🔓 **Already Connected**\n\nYour Spotify account is already connected! You can use all Spotify features.\n\nTo reconnect, first use `/spotify logout` and then try logging in again.',
+                ephemeral: true
+            });
+        }
+        
+        // Generate authentication URL with fallback support
+        try {
+            // Use getAuthorizationUrl with fallback support instead of direct API call
+            const authUrl = await spotifyUtils.getAuthorizationUrl(
+                userId, 
+                [
+                    'user-read-playback-state',
+                    'user-modify-playback-state',
+                    'user-read-currently-playing',
+                    'playlist-read-private',
+                    'playlist-read-collaborative',
+                    'playlist-modify-public',
+                    'playlist-modify-private',
+                    'user-library-read',
+                    'user-library-modify',
+                    'user-read-private',
+                    'user-read-email'
+                ]
+            );
+            
+            const embed = new EmbedBuilder()
+                .setColor('#1DB954')
+                .setTitle('Connect Your Spotify Account')
+                .setDescription('Click the button below to authorize access to your Spotify account. This will open a secure Spotify login page.')
+                .addFields(
+                    {
+                        name: '🔐 What permissions will be granted?',
+                        value: '• See your account details\n• View and control playback\n• Access your playlists\n• Add songs to your library',
+                        inline: false
+                    },
+                    {
+                        name: '🔒 Is it secure?',
+                        value: 'Yes! We use official Spotify OAuth. Your credentials are never shared with our bot.',
+                        inline: false
+                    },
+                    {
+                        name: '🌐 Need Help?',
+                        value: 'Visit our [Setup Guide](https://gogesmemebot.gogebot.art/spotify/guide) or [Troubleshooting](https://gogesmemebot.gogebot.art/spotify/help) page for detailed instructions.',
+                        inline: false
+                    }
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Spotify Authentication', iconURL: 'https://i.imgur.com/EpqijHC.png' });
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setLabel('Login with Spotify')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(authUrl)
+                        .setEmoji('🔗')
+                );
+
+            await interaction.editReply({
+                embeds: [embed],
+                components: [row],
+                ephemeral: true
+            });
+        } catch (error) {
+            console.error('[SpotifyCommand] Failed to generate auth URL:', error.message);
+            
+            // If both primary and fallback domains fail, provide information about direct Discord login
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Authentication Error')
+                .setDescription('Unable to generate login URL.')
+                .addFields({
+                    name: '🔄 Try again later',
+                    value: 'Our authentication service is temporarily unavailable. Please try again in a few minutes.',
+                    inline: false
+                })
+                .setTimestamp()
+                .setFooter({ text: 'Error Code: AUTH_TEMP_UNAVAILABLE' });
+                
+            await interaction.editReply({
+                embeds: [errorEmbed],
+                ephemeral: true
+            });
+        }
     } catch (error) {
-        console.error('Error generating Spotify auth URL:', error);
-        await interaction.reply({
-            content: '❌ **Authentication Error**\n\nFailed to generate authentication link. Please try again later.',
-            ephemeral: true
-        });
+        console.error('[SpotifyCommand] Login error:', error);
+        
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({
+                content: `❌ **Error:** ${error.message}`,
+                ephemeral: true
+            });
+        } else {
+            await interaction.editReply({
+                content: `❌ **Error:** ${error.message}`,
+                ephemeral: true
+            });
+        }
     }
 }
 
 async function handleLogout(interaction, userId) {
     if (!isUserAuthenticated(userId)) {
         await interaction.reply({
-            content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to connect one!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for detailed instructions.',
+            content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to connect one!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for detailed instructions.',
             ephemeral: true
         });
         return;
@@ -223,7 +289,7 @@ async function handleLogout(interaction, userId) {
 async function handleStatus(interaction, userId) {
     if (!isUserAuthenticated(userId)) {
         await interaction.reply({
-            content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to get started!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for detailed instructions.',
+            content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to get started!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for detailed instructions.',
             ephemeral: true
         });
         return;
@@ -328,14 +394,12 @@ async function handleControl(interaction, userId) {
         }
 
         if (action === 'shuffle') {
-            // Toggle shuffle - first get current state
             const currentState = await getUserCurrentPlayback(userId);
             params.state = !currentState?.shuffle_state;
             await controlUserPlayback(userId, 'shuffle', params);
         } else if (volume !== null && (action === 'play' || action === 'pause')) {
-            // Set volume first, then perform action
             await controlUserPlayback(userId, 'volume', { volume });
-            if (action !== 'play') { // Don't double-play
+            if (action !== 'play') { 
                 await controlUserPlayback(userId, action, params);
             }
         } else {
@@ -362,11 +426,11 @@ async function handleControl(interaction, userId) {
         let errorMessage = '❌ **Playback Control Failed**\n\n';
         
         if (error.message.includes('NO_ACTIVE_DEVICE')) {
-            errorMessage += 'No active Spotify device found. Please:\n• Open Spotify on any device\n• Start playing something\n• Try the command again\n\n🆘 **Need Help?** Check our [troubleshooting guide](https://gogesbot.workers.dev/spotify/help) for device setup.';
+            errorMessage += 'No active Spotify device found. Please:\n• Open Spotify on any device\n• Start playing something\n• Try the command again\n\n🆘 **Need Help?** Check our [troubleshooting guide](https://gogesmemebot.gogebot.art/spotify/help) for device setup.';
         } else if (error.message.includes('PREMIUM_REQUIRED')) {
-            errorMessage += 'This feature requires Spotify Premium.\n\n💡 **Tip:** Visit our [help page](https://gogesbot.workers.dev/spotify/help) to see which features work with free accounts.';
+            errorMessage += 'This feature requires Spotify Premium.\n\n💡 **Tip:** Visit our [help page](https://gogesmemebot.gogebot.art/spotify/help) to see which features work with free accounts.';
         } else {
-            errorMessage += `Error: ${error.message}\n\n🆘 **Troubleshooting:** Visit our [help page](https://gogesbot.workers.dev/spotify/help) for solutions.`;
+            errorMessage += `Error: ${error.message}\n\n🆘 **Troubleshooting:** Visit our [help page](https://gogesmemebot.gogebot.art/spotify/help) for solutions.`;
         }
 
         await interaction.editReply({ content: errorMessage });

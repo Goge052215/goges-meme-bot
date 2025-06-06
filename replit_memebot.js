@@ -6,8 +6,8 @@ const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord
 const fs = require('fs');
 const path = require('path');
 const { cookieManager } = require('./media/cookieManager');
-const { initializeSpotifyApi, setAccessToken } = require('./media/spotifyUtils');
-const keepAlive = require('./keep_alive');
+const { initializeSpotifyApi } = require('./media/spotifyUtils');
+const { keepAlive } = require('./keep_alive');
 
 const { loadCommands } = require('./commands/index');
 
@@ -37,84 +37,116 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isCommand()) return;
-
-  const command = client.commands.get(interaction.commandName);
-  console.log(`Received command: ${interaction.commandName}`);
-
-  if (!command) {
-    console.log(`Command not found: ${interaction.commandName}`);
-    try {
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: 'Command not found!', ephemeral: true });
-      }
-    } catch (err) {
-      console.error('Error replying to invalid command:', err);
-    }
-    return;
-  }
-
-  try {
-    await command.execute(interaction, client);
-  } catch (error) {
-    console.error(`Error executing command ${interaction.commandName}:`, error);
+client.on('interactionCreate', async interaction => {
+  if (interaction.isChatInputCommand()) {
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
     
-    const errorMessage = 'There was an error while executing this command!';
     try {
-      if (interaction.deferred) {
-        await interaction.editReply({ content: errorMessage, ephemeral: true });
-      } else if (!interaction.replied) {
-        await interaction.reply({ content: errorMessage, ephemeral: true });
-      } else {
-        await interaction.followUp({ content: errorMessage, ephemeral: true });
+      await command.execute(interaction, client);
+    } catch (error) {
+      console.error(`Error executing ${interaction.commandName}`);
+      console.error(error);
+      await interaction.reply({
+        content: 'There was an error while executing this command!',
+        ephemeral: true
+      }).catch(console.error);
+    }
+  }
+  
+  if (interaction.isButton() && interaction.customId.startsWith('spotify_')) {
+    try {
+      const [action, userId] = interaction.customId.split('_').slice(1);
+      
+      if (userId !== interaction.user.id) {
+        return interaction.reply({
+          content: 'This button is not for you to use.',
+          ephemeral: true
+        });
       }
-    } catch (replyError) {
-      console.error('Error handling failed command in main handler:', replyError);
+      
+      await interaction.deferUpdate();
+      
+      const { isUserAuthenticated, controlUserPlayback } = require('./worker-kv-interface');
+      const isAuthenticated = await isUserAuthenticated(userId);
+      
+      if (!isAuthenticated) {
+        return interaction.followUp({
+          content: 'Your Spotify account is no longer connected. Use `/spotify login` to reconnect.',
+          ephemeral: true
+        });
+      }
+      
+      if (action === 'devices') {
+        const devicesCommand = client.commands.get('spotify');
+        const fakeInteraction = {
+          ...interaction,
+          options: {
+            getSubcommand: () => 'devices'
+          },
+          deferReply: async (opts) => {},
+          editReply: async (opts) => interaction.followUp({ ...opts, ephemeral: true })
+        };
+        
+        await devicesCommand.execute(fakeInteraction, client);
+        return;
+      }
+      
+      await controlUserPlayback(userId, action);
+      
+      const actionMessages = {
+        play: '▶️ Playback resumed',
+        pause: '⏸️ Playback paused',
+        next: '⏭️ Skipped to next track',
+        previous: '⏮️ Skipped to previous track'
+      };
+      
+      await interaction.followUp({
+        content: actionMessages[action] || 'Playback control executed',
+        ephemeral: true
+      }).catch(console.error);
+    } catch (error) {
+      console.error('[Spotify Button]', error);
+      await interaction.followUp({
+        content: `Error: ${error.message}`,
+        ephemeral: true
+      }).catch(console.error);
     }
   }
 });
 
-function loadToken() {
-  try {
-    const configPath = path.join(__dirname, 'config.env');
-    if (fs.existsSync(configPath)) {
-      const config = fs.readFileSync(configPath, 'utf8');
-      const tokenMatch = config.match(/DISCORD_TOKEN=(.+)/);
-      if (tokenMatch && tokenMatch[1]) {
-        return tokenMatch[1].trim();
-      }
-    }
-    return null;
-  } catch (error) {
-    console.error('Error loading token from config file:', error);
-    return null;
-  }
-}
-
 const question = (q) => new Promise((resolve) => rl.question(q, resolve));
 (async () => {
-  let token = loadToken();
+  let token = process.env.DISCORD_TOKEN;
   
   if (!token) {
-    console.log('No token found in config.env file.');
+    console.log('No DISCORD_TOKEN found in environment. Please provide one.');
     token = await question('Application token? ');
     
-    const saveToken = await question('Do you want to save this token for next time? (y/n) ');
+    const saveToken = await question('Do you want to save this token to config.env for next time? (y/n) ');
     if (saveToken.toLowerCase() === 'y') {
       try {
-        const weatherApiKey = process.env.WEATHER_API_KEY || '';
-        fs.writeFileSync('config.env', `# Discord Bot Token\nDISCORD_TOKEN=${token}\n\n# OpenWeatherMap API Key\nWEATHER_API_KEY=${weatherApiKey}\n\n# Don't share this file or upload it to public repositories!`);
+        const envContent = fs.existsSync('config.env') ? fs.readFileSync('config.env', 'utf8') : '';
+        let newContent;
+        if (envContent.includes('DISCORD_TOKEN')) {
+          newContent = envContent.replace(/DISCORD_TOKEN=.*/, `DISCORD_TOKEN=${token}`);
+        } else {
+          newContent = envContent + `\nDISCORD_TOKEN=${token}\n`;
+        }
+        fs.writeFileSync('config.env', newContent);
         console.log('Token saved to config.env file.');
       } catch (error) {
         console.error('Error saving token to config file:', error);
       }
     }
   } else {
-    console.log('Token loaded from config.env file.');
+    console.log('Token loaded successfully from environment.');
   }
   
-  if (!token) throw new Error('Invalid token');
+  if (!token || token.length < 50) {
+    console.error('❌ Invalid or missing Discord token. Please set DISCORD_TOKEN in your config.env file or in your hosting provider\'s environment variables.');
+    process.exit(1);
+  }
 
   const ratelimitTest = await fetch(`https://discord.com/api/v10/invites/discord-developers`);
 
@@ -125,7 +157,15 @@ const question = (q) => new Promise((resolve) => rl.question(q, resolve));
   };
   
   await client.login(token).catch((err) => {
-    throw err
+    if (err.code === 'TokenInvalid') {
+      console.error('❌ ERROR: Invalid Discord token provided!');
+      console.error('Please check your config.env file and ensure the DISCORD_TOKEN is correct.');
+      console.error('Common issues include extra spaces, missing characters, or using an old, invalidated token.');
+      console.error('Your new token should be a long string of characters provided by the Discord Developer Portal.');
+    } else {
+      console.error('❌ An error occurred during login:', err.message);
+    }
+    process.exit(1);
   });
 
   console.log('Initializing simplified cookie manager for SoundCloud fallback...');
@@ -173,11 +213,9 @@ const question = (q) => new Promise((resolve) => rl.question(q, resolve));
 
   console.log('DONE | Meme Bot is up and running. DO NOT CLOSE THIS TAB UNLESS YOU ARE FINISHED USING THE BOT, IT WILL PUT THE BOT OFFLINE.');
   
-  // Start the Express server for OAuth callbacks and health checks
   keepAlive();
 })();
 
-// Cleanup on bot shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down bot...');
   cookieManager.cleanup();

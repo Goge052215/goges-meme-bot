@@ -223,7 +223,7 @@ async function handlePlay(interaction) {
   // Check if user wants to add to Spotify queue but isn't authenticated
   if (addToSpotifyQueue && !userHasSpotify) {
     return interaction.editReply({
-      content: '🔐 **Authentication Required**\n\nTo add songs to your Spotify queue, you need to connect your account first.\n\n**Steps:**\n1. Use `/spotify login` to connect your account\n2. Complete the authentication process\n3. Try this command again with the `spotify_queue` option\n\n**Alternative:** Remove the `spotify_queue` option to play through Discord instead.\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for step-by-step instructions.'
+      content: '🔐 **Authentication Required**\n\nTo add songs to your Spotify queue, you need to connect your account first.\n\n**Steps:**\n1. Use `/spotify login` to connect your account\n2. Complete the authentication process\n3. Try this command again with the `spotify_queue` option\n\n**Alternative:** Remove the `spotify_queue` option to play through Discord instead.\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for step-by-step instructions.'
     });
   }
   
@@ -243,7 +243,7 @@ async function handlePlay(interaction) {
     if (!searchResults || searchResults.length === 0 || searchResults[0].isError) {
       let errorMessage = '❌ No results found for your search.';
       if (!userHasSpotify) {
-        errorMessage += '\n\n💡 **Tip:** Connect your Spotify account with `/spotify login` for access to enhanced features and your personal music!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesbot.workers.dev/spotify/guide) for step-by-step instructions.';
+        errorMessage += '\n\n💡 **Tip:** Connect your Spotify account with `/spotify login` for access to enhanced features and your personal music!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for step-by-step instructions.';
       }
       return interaction.editReply(errorMessage);
     }

@@ -37,7 +37,7 @@
     "express": "^4.19.2",
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.13",
-    "node-fetch": "^2.7.0",
+    "node-fetch": "^2.6.7",
     "opusscript": "^0.0.8",
     "sodium-native": "^4.1.1",
     "spotify-web-api-node": "^5.0.2",
@@ -53,5 +53,5 @@
   "bugs": {
     "url": "https://github.com/your-username/goges-discord-music-bot/issues"
   },
-  "homepage": "https://gogesbot.workers.dev"
+  "homepage": "https://gogesmemebot.gogebot.art"
 }

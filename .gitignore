@@ -45,6 +45,11 @@ jspm_packages/
 # Private web interface - keep separate from version control
 cloudflare-worker.js
 *.worker.js 
+worker-deploy/
 
 # Application Zip
 goges_memebot.zip
+wrangler.toml
+
+# Wrangler cache and temporary files
+.wrangler/

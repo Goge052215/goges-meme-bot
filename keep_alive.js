@@ -497,7 +497,7 @@ function initializeSpotifyAuth() {
       },
       endpoints: {
         web: "Cloudflare Workers",
-        domain: "gogesbot.hx13651954192.workers.dev",
+        domain: "gogesbot.goge052215.workers.dev",
         custom_domain: "gogesbot.net.eu.org (pending)",
         discloud: process.env.APP_URL || "https://gogesbot.discloud.app"
       },

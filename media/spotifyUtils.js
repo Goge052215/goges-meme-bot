@@ -29,7 +29,13 @@ async function initializeModule() {
 
 function initializeSpotifyApi() {
     try {
-        const redirectUri = process.env.SPOTIFY_REDIRECT_URI || 'https://gogesbot.hx13651954192.workers.dev/spotify/callback';
+        // Primary domain with fallback
+        const PRIMARY_DOMAIN = 'https://gogesmemebot.gogebot.art';
+        const FALLBACK_DOMAIN = 'https://gogesbot.goge052215.workers.dev';
+        
+        // Use environment variable, primary domain, or fallback in that order
+        const redirectUri = process.env.SPOTIFY_REDIRECT_URI || 
+                           `${PRIMARY_DOMAIN}/spotify/callback`;
         
         spotifyApiInstance = new SpotifyWebApi({
             clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -37,10 +43,13 @@ function initializeSpotifyApi() {
             redirectUri: redirectUri
         });
 
-        return true;
+        // Store fallback URL for recovery scenarios
+        spotifyApiInstance.fallbackRedirectUri = `${FALLBACK_DOMAIN}/spotify/callback`;
+        
+        return spotifyApiInstance;
     } catch (error) {
-        console.error('[SpotifyUtils] Failed to initialize Spotify API:', error.message);
-        return false;
+        console.error('Failed to initialize Spotify API:', error);
+        throw error;
     }
 }
 
@@ -418,6 +427,52 @@ async function getCurrentPlaybackState() {
     throw new Error('User authentication required for playback state');
 }
 
+/**
+ * Generate a secure state string for Spotify OAuth
+ * @param {string} userId - Discord user ID
+ * @returns {string} State string in format userId_timestamp
+ */
+function generateState(userId) {
+    return `${userId}_${Date.now()}`;
+}
+
+// Add getAuthorizationUrl function with proper definitions
+function getAuthorizationUrl(userId, scopes) {
+    try {
+        // Make sure spotifyApi is initialized
+        const spotifyApi = initializeSpotifyApi();
+        if (!spotifyApi) {
+            throw new Error('Failed to initialize Spotify API');
+        }
+        
+        const state = generateState(userId);
+        return spotifyApi.createAuthorizeURL(scopes, state);
+    } catch (error) {
+        console.error('Error generating authorization URL with primary domain, trying fallback', error);
+        
+        // Try with fallback domain if primary fails
+        try {
+            // Re-initialize Spotify API with fallback URL
+            const spotifyApi = initializeSpotifyApi();
+            if (!spotifyApi) {
+                throw new Error('Failed to initialize Spotify API with fallback URL');
+            }
+            
+            const originalRedirectUri = spotifyApi.getRedirectURI();
+            spotifyApi.setRedirectURI(spotifyApi.fallbackRedirectUri);
+            const state = generateState(userId);
+            const fallbackUrl = spotifyApi.createAuthorizeURL(scopes, state);
+            
+            // Restore the original redirect URI
+            spotifyApi.setRedirectURI(originalRedirectUri);
+            return fallbackUrl;
+        } catch (fallbackError) {
+            console.error('Fallback authorization URL generation also failed', fallbackError);
+            throw fallbackError;
+        }
+    }
+}
+
 module.exports = {
     // Core functions
     initializeSpotifyApi,
@@ -452,5 +507,7 @@ module.exports = {
     // Legacy compatibility (deprecated)
     addToQueue,
     startPlayback,
-    getCurrentPlaybackState
+    getCurrentPlaybackState,
+    getAuthorizationUrl,
+    generateState
 }; 
