@@ -12,6 +12,15 @@ class MusicPageRank {
         this.dampingFactor = 0.85;
         this.convergenceThreshold = 0.001; 
         this.maxIterations = 30;
+        
+        const theoreticalMax = Math.ceil(Math.log(1 / this.convergenceThreshold) / (1 - this.dampingFactor));
+        if (this.maxIterations < theoreticalMax) {
+            console.log(`[MusicPageRank] Adjusting maxIterations from ${this.maxIterations} to theoretical bound ${theoreticalMax} for convergence`);
+            this.maxIterations = theoreticalMax;
+        } else {
+            console.log(`[MusicPageRank] Using theoretical bound ${theoreticalMax} as maxIterations for optimal convergence`);
+            this.maxIterations = theoreticalMax;
+        }
         this.minGraphSizeForPageRank = 5; 
         
         this.dirtyNodes = new Set();

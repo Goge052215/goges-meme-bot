@@ -32,13 +32,38 @@ $$
 
 ## 3. Convergence Bound
 
-The number of iterations $k$ to reach tolerance $$ satisfies:
+The number of iterations $k$ to reach tolerance $\epsilon$ satisfies:
 
 $$
-k = O\Bigl(\frac{\ln(1/\u0003)}{1 - d}\Bigr)
+k = O\Bigl(\frac{\ln(1/\epsilon)}{1 - d}\Bigr)
 $$
 
-Relaxing the threshold ($\u0003 \approx 10^{-3}$) reduces $k$ while maintaining ranking quality.
+Relaxing the threshold ($\epsilon \approx 10^{-3}$) reduces $k$ while maintaining ranking quality.
+
+### 3.1 Practical Iteration Limit
+
+Given the code parameters:
+- damping factor \(d = 0.85\)
+- convergence threshold \(\epsilon = 10^{-3}\)
+
+the theoretical number of iterations required to converge is:
+
+\[
+k = \frac{\ln(1/\epsilon)}{1 - d} \approx \frac{\ln(1000)}{0.15} \approx 46
+\]
+
+However, the implementation's `maxIterations` is set to 30 by default. To ensure convergence, we can dynamically compute and adjust `maxIterations`:
+
+```javascript
+// inside constructor
+const theoreticalMax = Math.ceil(Math.log(1 / this.convergenceThreshold) / (1 - this.dampingFactor));
+if (this.maxIterations < theoreticalMax) {
+    console.log(`[MusicPageRank] Adjusting maxIterations from ${this.maxIterations} to theoretical bound ${theoreticalMax}`);
+    this.maxIterations = theoreticalMax;
+}
+```
+
+This guarantees the algorithm runs for at least the theoretical bound when needed.
 
 ## 4. Incremental vs Full Updates
 
@@ -90,7 +115,7 @@ Since $M \le 10$ is small, this remains dominated by caching and incremental upd
 | Aspect                         | Full PR         | Incremental PR      | Cached Search     |
 |--------------------------------|-----------------|---------------------|-------------------|
 | Complexity per update/query    | $O(k(N+E))$     | $O(k'(S+E_S))$      | $O(1)$ (hit)      |
-| Iterations $k$                 | $O(\ln(1/\u0003)/(1-d))$ | $O(\ln(1/\u0003)/(1-d))$ | —                 |
+| Iterations $k$                 | $O(\ln(1/\epsilon)/(1-d))$ | $O(\ln(1/\epsilon)/(1-d))$ | —                 |
 | Typical speedup               | —               | $\approx N/S$       | —                 |
 | Real-time search cost         | —               | —                   | $O(M)$            |
 
