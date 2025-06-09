@@ -2,7 +2,7 @@ require('dotenv').config({ path: './config.env' });
 const { createInterface } = require('node:readline');
 const { execSync } = require('child_process');
 const fetch = require('node-fetch');
-const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const { cookieManager } = require('./media/cookieManager');
@@ -49,7 +49,7 @@ client.on('interactionCreate', async interaction => {
       console.error(error);
       await interaction.reply({
         content: 'There was an error while executing this command!',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       }).catch(console.error);
     }
   }
@@ -61,7 +61,7 @@ client.on('interactionCreate', async interaction => {
       if (userId !== interaction.user.id) {
         return interaction.reply({
           content: 'This button is not for you to use.',
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       
@@ -73,7 +73,7 @@ client.on('interactionCreate', async interaction => {
       if (!isAuthenticated) {
         return interaction.followUp({
           content: 'Your Spotify account is no longer connected. Use `/spotify login` to reconnect.',
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       
@@ -85,7 +85,7 @@ client.on('interactionCreate', async interaction => {
             getSubcommand: () => 'devices'
           },
           deferReply: async (opts) => {},
-          editReply: async (opts) => interaction.followUp({ ...opts, ephemeral: true })
+          editReply: async (opts) => interaction.followUp({ ...opts, flags: MessageFlags.Ephemeral })
         };
         
         await devicesCommand.execute(fakeInteraction, client);
@@ -103,13 +103,13 @@ client.on('interactionCreate', async interaction => {
       
       await interaction.followUp({
         content: actionMessages[action] || 'Playback control executed',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       }).catch(console.error);
     } catch (error) {
       console.error('[Spotify Button]', error);
       await interaction.followUp({
         content: `Error: ${error.message}`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       }).catch(console.error);
     }
   }

@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
+const { MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -29,7 +30,7 @@ module.exports = {
     
     return interaction.reply({
       content: helpText,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }; 

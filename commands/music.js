@@ -1,7 +1,7 @@
 require('dotenv').config({ path: '../config.env' });
 const { SlashCommandBuilder, EmbedBuilder } = require('@discordjs/builders');
 const { joinVoiceChannel, getVoiceConnection, StreamType, demuxProbe } = require('@discordjs/voice');
-const { ActionRowBuilder, StringSelectMenuBuilder, ComponentType } = require('discord.js');
+const { ActionRowBuilder, StringSelectMenuBuilder, ComponentType, MessageFlags } = require('discord.js');
 
 const {
   isSpotifyUrl,
@@ -95,12 +95,12 @@ module.exports = {
     if (!member.voice.channel && ['play', 'stop', 'skip', 'loop'].includes(subcommand)) {
       return interaction.reply({ 
         content: 'You need to be in a voice channel to use this music command!', 
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
       });
     }
     
     if (subcommand === 'queue') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         if (!queue.songs.length) {
           let queueMessage = 'The Discord queue is empty!';
@@ -133,8 +133,8 @@ module.exports = {
         return interaction.editReply(queueString);
       } catch (err) {
         console.error('Error in queue command:', err);
-        if (!interaction.replied && !interaction.deferred) return interaction.reply({ content: 'Error displaying queue.', ephemeral: true }).catch(console.error);
-        return interaction.editReply({ content: 'Error displaying queue.', ephemeral: true }).catch(console.error);
+        if (!interaction.replied && !interaction.deferred) return interaction.reply({ content: 'Error displaying queue.', flags: MessageFlags.Ephemeral }).catch(console.error);
+        return interaction.editReply({ content: 'Error displaying queue.', flags: MessageFlags.Ephemeral }).catch(console.error);
       }
     }
 
@@ -152,10 +152,10 @@ module.exports = {
                 console.log('Voice connection established and player subscribed.');
             } catch (connectionError) {
                 console.error("Error joining voice channel or subscribing player:", connectionError);
-                return interaction.reply({ content: 'Could not join your voice channel.', ephemeral: true });
+                return interaction.reply({ content: 'Could not join your voice channel.', flags: MessageFlags.Ephemeral });
             }
         } else {
-             return interaction.reply({ content: 'You must be in a voice channel to play music.', ephemeral: true });
+             return interaction.reply({ content: 'You must be in a voice channel to play music.', flags: MessageFlags.Ephemeral });
         }
     }
 
@@ -188,7 +188,7 @@ module.exports = {
         default:
           await interaction.reply({
             content: '❌ Unknown music command.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
       }
     } catch (error) {
@@ -198,12 +198,12 @@ module.exports = {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
           content: `❌ Error: ${errorMessage}`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       } else {
         await interaction.reply({
           content: `❌ Error: ${errorMessage}`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
     }
@@ -258,7 +258,7 @@ async function handlePlay(interaction) {
     if (firstResult.isError) {
       await interaction.editReply({
         content: firstResult.errorMessage,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -371,7 +371,7 @@ async function handlePlay(interaction) {
       if (!success) {
         await interaction.editReply({
           content: `❌ Failed to ${addToSpotifyQueue ? 'add to queue' : 'play'} "${firstResult.title}". ${firstResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -399,7 +399,7 @@ async function handlePlay(interaction) {
     console.error('Search error:', error);
     await interaction.editReply({
       content: `❌ Search failed: ${error.message}`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }
@@ -506,7 +506,7 @@ async function playSelectedSong(interaction, selectedResult, addToSpotifyQueue) 
   if (selectedResult.isError) {
     await interaction.followUp({
       content: selectedResult.errorMessage,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -560,7 +560,7 @@ async function playSelectedSong(interaction, selectedResult, addToSpotifyQueue) 
     if (!success) {
       await interaction.followUp({
         content: `❌ Failed to ${addToSpotifyQueue ? 'add to queue' : 'play'} "${selectedResult.title}". ${selectedResult.spotifyUri ? 'Make sure you have an active Spotify session.' : 'Streaming error occurred.'}`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   }
@@ -573,7 +573,7 @@ async function handleSearch(interaction) {
   if (!interaction.member.voice.channel && !addToSpotifyQueue) {
     return interaction.reply({ 
       content: 'You need to be in a voice channel to play music! Use `spotify_queue: true` to add to Spotify queue instead.', 
-      ephemeral: true 
+      flags: MessageFlags.Ephemeral 
     });
   }
   
@@ -591,7 +591,7 @@ async function handleSearch(interaction) {
     if (!searchResults || searchResults.length === 0) {
       await interaction.editReply({
         content: `❌ No results found for "${query}". Try different keywords or artist names.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -602,7 +602,7 @@ async function handleSearch(interaction) {
     console.error('Search command error:', error);
     await interaction.editReply({
       content: `❌ Search failed: ${error.message}`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }
@@ -611,7 +611,7 @@ async function handleCurrent(interaction) {
   const userId = interaction.user.id;
   const userHasSpotify = isUserAuthenticated(userId);
   
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const guildId = interaction.guildId;
@@ -696,7 +696,7 @@ async function handlePause(interaction) {
   const guildId = interaction.guildId;
   const queue = getQueue(guildId);
   
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (!queue.playing) {
     return interaction.editReply('⏸️ Nothing is currently playing in Discord!');
@@ -724,7 +724,7 @@ async function handleResume(interaction) {
   const guildId = interaction.guildId;
   const queue = getQueue(guildId);
   
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (queue.playing) {
     return interaction.editReply('▶️ Discord playback is already running!');
@@ -756,7 +756,7 @@ async function handleSkip(interaction) {
   const guildId = interaction.guildId;
   const queue = getQueue(guildId);
   
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (queue.songs.length === 0) {
     return interaction.editReply('❌ No songs in the Discord queue to skip.');
@@ -788,7 +788,7 @@ async function handlePrevious(interaction) {
   const guildId = interaction.guildId;
   const queue = getQueue(guildId);
   
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   let message = '❌ **Previous Track Not Available**\n\nThe Discord bot queue doesn\'t support going to the previous track.';
   
@@ -869,7 +869,7 @@ async function handleSpotifyQueueAdd(interaction, query, userId) {
 }
 
 async function handleStats(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   
   try {
     const stats = musicPageRank.getGraphStats();

@@ -117,54 +117,60 @@ The bot implements a sophisticated PageRank algorithm adapted for music recommen
 
 ```mermaid
 graph TD
-    A[🔍 Search Query] --> B[🎵 Music Aggregator]
-    B --> C[📊 Search Results]
-    C --> D[⚡ PageRank Enhancement]
-    D --> E[✨ Ranked Results]
+    A["Search Query"] --> B["Music Aggregator"]
+    B --> C["Search Results"]
+    C --> D["PageRank Enhancement"]
+    D --> E["Ranked Results"]
     
-    F[▶️ User Plays Song] --> G[📈 Record Event]
-    G --> H[🔗 Update Graph]
+    F["User Plays Song"] --> G["Record Event"]
+    G --> H["Update Graph"]
     
-    I[📋 Playlist Created] --> J[🔗 Co-occurrence]
+    I["Playlist Created"] --> J["Co-occurrence"]
     J --> H
     
-    K[🎶 Queue Activity] --> L[📊 Pattern Record]
+    K["Queue Activity"] --> L["Pattern Record"]
     L --> H
     
-    H --> M[🧠 PageRank Engine]
-    M --> N[🎯 Popularity Scores]
+    H --> M["PageRank Engine"]
+    M --> N["Popularity Scores"]
     N --> D
     
-    subgraph PR [" PageRank Calculation "]
-        M --> P[🔄 Iterations]
-        P --> Q[✅ Convergence]
-        Q --> R[📊 Final Scores]
+    subgraph PR["PageRank Calculation"]
+        M --> P["Iterations"]
+        P --> Q["Convergence"]
+        Q --> R["Final Scores"]
         R --> N
     end
     
-    style A fill:#e3f2fd
-    style E fill:#e8f5e8
-    style M fill:#f3e5f5
-    style N fill:#fff3e0
-    style PR fill:#f5f5f5
+    classDef default fill:#2d3748,stroke:#4a5568,stroke-width:2px,color:#ffffff
+    classDef highlight fill:#3182ce,stroke:#2c5282,stroke-width:2px,color:#ffffff
+    classDef engine fill:#9f7aea,stroke:#805ad5,stroke-width:2px,color:#ffffff
+    
+    class A,F,I,K highlight
+    class M,PR engine
+    class E fill:#38a169,stroke:#2f855a,stroke-width:2px,color:#ffffff
 ```
 
 ### System Data Flow
 
 ```mermaid
 flowchart LR
-    A[💬 Discord Command] --> B[✅ Validation]
-    B --> C[🔐 Auth Check]
-    C --> D[🎵 Search Music]
-    D --> E[🎯 Apply PageRank]
-    E --> F[🎶 Queue & Play]
-    F --> G[📊 Record Activity]
-    G --> H[🔄 Update Graph]
+    A["Discord Command"] --> B["Validation"]
+    B --> C["Auth Check"]
+    C --> D["Search Music"]
+    D --> E["Apply PageRank"]
+    E --> F["Queue & Play"]
+    F --> G["Record Activity"]
+    G --> H["Update Graph"]
     
-    style A fill:#e3f2fd
-    style E fill:#e8f5e8
-    style F fill:#fff3e0
-    style H fill:#f3e5f5
+    classDef default fill:#2d3748,stroke:#4a5568,stroke-width:2px,color:#ffffff
+    classDef command fill:#3182ce,stroke:#2c5282,stroke-width:2px,color:#ffffff
+    classDef process fill:#9f7aea,stroke:#805ad5,stroke-width:2px,color:#ffffff
+    classDef result fill:#38a169,stroke:#2f855a,stroke-width:2px,color:#ffffff
+    
+    class A command
+    class E,H process
+    class F result
 ```
 
 ### Relationship Weights

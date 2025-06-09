@@ -3,6 +3,7 @@ if (!process.env.SPOTIFY_CLIENT_ID) {
     require('dotenv').config({ path: '../config.env' });
 }
 const SpotifyWebApi = require('spotify-web-api-node');
+const fetch = require('node-fetch');
 
 let spotifyApiInstance = null;
 const userTokens = new Map();
@@ -23,6 +24,13 @@ async function initializeModule() {
             console.log('[SpotifyUtils] Spotify API initialized successfully');
         } else {
             console.log('[SpotifyUtils] Spotify API initialized but token acquisition failed');
+        }
+        
+        // Load existing user tokens from worker KV
+        try {
+            await loadTokensFromWorker();
+        } catch (error) {
+            console.error('[SpotifyUtils] Failed to load tokens from worker on startup:', error.message);
         }
     }
 }
@@ -170,6 +178,16 @@ async function processCallbackFromWorker(discordUserId, code, state) {
         
         if (result.success) {
             console.log(`[SpotifyUtils] OAuth completion successful for ${discordUserId}`);
+            
+            // Sync token data to worker KV store
+            try {
+                await syncTokenToWorker(discordUserId, result.tokenData);
+                console.log(`[SpotifyUtils] Token synced to worker KV for ${discordUserId}`);
+            } catch (syncError) {
+                console.error(`[SpotifyUtils] Failed to sync token to worker KV: ${syncError.message}`);
+                // Don't fail the auth if sync fails
+            }
+            
             return {
                 success: true,
                 userInfo: {
@@ -186,6 +204,66 @@ async function processCallbackFromWorker(discordUserId, code, state) {
     } catch (error) {
         console.error(`[SpotifyUtils] OAuth processing failed: ${error.message}`);
         return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Sync token data to worker KV store
+ * @param {string} userId Discord user ID
+ * @param {Object} tokenData Token data from local authentication
+ */
+async function syncTokenToWorker(userId, tokenData) {
+    try {
+        const WORKER_URL = process.env.APP_URL || 'https://gogesmemebot.gogebot.art';
+        const FALLBACK_URL = 'https://gogesbot.goge052215.workers.dev';
+        
+        const payload = {
+            userId,
+            spotifyUserId: tokenData.spotifyUserId,
+            displayName: tokenData.displayName,
+            email: tokenData.email,
+            product: tokenData.product,
+            accessToken: tokenData.accessToken,
+            refreshToken: tokenData.refreshToken,
+            expiresAt: tokenData.expiresAt,
+            authorizedAt: tokenData.authorizedAt
+        };
+        
+        let response;
+        try {
+            response = await fetch(`${WORKER_URL}/api/tokens/${userId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (primaryError) {
+            console.log(`[SpotifyUtils] Primary sync failed, trying fallback: ${primaryError.message}`);
+            
+            response = await fetch(`${FALLBACK_URL}/api/tokens/${userId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Fallback also failed: HTTP ${response.status}`);
+            }
+        }
+        
+        console.log(`[SpotifyUtils] Successfully synced token to worker KV for user ${userId}`);
+    } catch (error) {
+        console.error(`[SpotifyUtils] Failed to sync token to worker: ${error.message}`);
+        throw error;
     }
 }
 
@@ -473,6 +551,141 @@ function getAuthorizationUrl(userId, scopes) {
     }
 }
 
+/**
+ * Sync token data from worker KV store to local storage
+ * @param {string} userId Discord user ID
+ */
+async function syncTokenFromWorker(userId) {
+    try {
+        const WORKER_URL = process.env.APP_URL || 'https://gogesmemebot.gogebot.art';
+        const FALLBACK_URL = 'https://gogesbot.goge052215.workers.dev';
+        
+        let response;
+        try {
+            response = await fetch(`${WORKER_URL}/api/tokens/${userId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                }
+            });
+            
+            if (response.status === 404) {
+                return null; // No token exists
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (primaryError) {
+            console.log(`[SpotifyUtils] Primary token fetch failed, trying fallback: ${primaryError.message}`);
+            
+            response = await fetch(`${FALLBACK_URL}/api/tokens/${userId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                }
+            });
+            
+            if (response.status === 404) {
+                return null; // No token exists
+            }
+            
+            if (!response.ok) {
+                throw new Error(`Fallback also failed: HTTP ${response.status}`);
+            }
+        }
+        
+        const tokenData = await response.json();
+        
+        // Convert worker token format to local format
+        const localTokenData = {
+            accessToken: tokenData.accessToken,
+            refreshToken: tokenData.refreshToken,
+            expiresAt: tokenData.expiresAt,
+            spotifyUserId: tokenData.spotifyUserId,
+            discordUserId: userId,
+            displayName: tokenData.displayName,
+            email: tokenData.email,
+            product: tokenData.product,
+            country: tokenData.country,
+            authorizedAt: tokenData.authorizedAt
+        };
+        
+        // Store in local memory
+        userTokens.set(userId, localTokenData);
+        
+        // Schedule token refresh if needed
+        const expiresIn = Math.max(0, Math.floor((tokenData.expiresAt - Date.now()) / 1000));
+        if (expiresIn > 300) { // More than 5 minutes remaining
+            scheduleTokenRefresh(userId, expiresIn);
+        }
+        
+        console.log(`[SpotifyUtils] Successfully synced token from worker KV for user ${userId}`);
+        return localTokenData;
+    } catch (error) {
+        console.error(`[SpotifyUtils] Failed to sync token from worker: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Load all tokens from worker KV store on startup
+ */
+async function loadTokensFromWorker() {
+    try {
+        const WORKER_URL = process.env.APP_URL || 'https://gogesmemebot.gogebot.art';
+        const FALLBACK_URL = 'https://gogesbot.goge052215.workers.dev';
+        
+        let response;
+        try {
+            response = await fetch(`${WORKER_URL}/api/tokens`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (primaryError) {
+            console.log(`[SpotifyUtils] Primary token list fetch failed, trying fallback: ${primaryError.message}`);
+            
+            response = await fetch(`${FALLBACK_URL}/api/tokens`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.WORKER_API_KEY || 'none'}`
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Fallback also failed: HTTP ${response.status}`);
+            }
+        }
+        
+        const data = await response.json();
+        const userIds = data.userIds || [];
+        
+        console.log(`[SpotifyUtils] Loading ${userIds.length} tokens from worker KV...`);
+        
+        let loadedCount = 0;
+        for (const userId of userIds) {
+            const tokenData = await syncTokenFromWorker(userId);
+            if (tokenData) {
+                loadedCount++;
+            }
+        }
+        
+        console.log(`[SpotifyUtils] Successfully loaded ${loadedCount} tokens from worker KV`);
+    } catch (error) {
+        console.error(`[SpotifyUtils] Failed to load tokens from worker: ${error.message}`);
+    }
+}
+
 module.exports = {
     // Core functions
     initializeSpotifyApi,
@@ -490,6 +703,7 @@ module.exports = {
     revokeUserAuth,
     hasPendingAuth,
     getAuthStatus,
+    syncTokenToWorker,
     
     // User-specific functions
     getUserPlaylists,
@@ -509,5 +723,9 @@ module.exports = {
     startPlayback,
     getCurrentPlaybackState,
     getAuthorizationUrl,
-    generateState
+    generateState,
+    
+    // New functions
+    syncTokenFromWorker,
+    loadTokensFromWorker
 }; 

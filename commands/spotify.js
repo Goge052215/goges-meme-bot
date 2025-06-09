@@ -1,7 +1,15 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const { 
-    generateAuthUrl, 
-    isUserAuthenticated, 
+    isUserAuthenticated: workerIsUserAuthenticated,
+    revokeUserToken: workerRevokeUserToken,
+    getUserToken
+} = require('../worker-kv-interface');
+const spotifyUtils = require('../media/spotifyUtils');
+
+// Use local spotifyUtils for all authentication operations
+const {
+    generateAuthUrl,
+    isUserAuthenticated,
     revokeUserAuth,
     getUserCurrentPlayback,
     controlUserPlayback,
@@ -9,9 +17,9 @@ const {
     getUserPlaylists,
     addToUserQueue,
     getSpotifyTrackId,
-    isSpotifyUrl
-} = require('../worker-kv-interface');
-const spotifyUtils = require('../media/spotifyUtils');
+    isSpotifyUrl,
+    getAuthStatus
+} = spotifyUtils;
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -94,8 +102,11 @@ module.exports = {
                     option
                         .setName('device')
                         .setDescription('Device ID to use (leave empty for current device)')
-                )
-        ),
+                ))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('debug')
+                .setDescription('Debug authentication status')),
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -124,10 +135,13 @@ module.exports = {
                 case 'queue':
                     await handleQueue(interaction, userId);
                     break;
+                case 'debug':
+                    await handleDebug(interaction, userId);
+                    break;
                 default:
                     await interaction.reply({ 
                         content: '❌ Unknown subcommand.', 
-                        ephemeral: true 
+                        flags: MessageFlags.Ephemeral 
                     });
             }
         } catch (error) {
@@ -137,7 +151,7 @@ module.exports = {
                 ? '🔐 **Authentication Required**\n\nYou need to connect your Spotify account first. Use `/spotify login` to get started!\n\n🌐 **Need Help?** Visit our [Setup Guide](https://gogesmemebot.gogebot.art/spotify/guide) for step-by-step instructions.'
                 : `❌ **Error:** ${error.message}\n\n🆘 **Troubleshooting:** Check our [Help Page](https://gogesmemebot.gogebot.art/spotify/help) for common solutions.`;
             
-            const replyOptions = { content: errorMessage, ephemeral: true };
+            const replyOptions = { content: errorMessage, flags: MessageFlags.Ephemeral };
             
             try {
                 if (interaction.deferred) {
@@ -156,13 +170,16 @@ module.exports = {
 
 async function handleLogin(interaction, userId) {
     try {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         
-        // Check if user is already authenticated
-        if (await isUserAuthenticated(userId)) {
+        // Check if user is already authenticated using BOTH systems
+        const localAuth = isUserAuthenticated(userId);
+        const workerAuth = await workerIsUserAuthenticated(userId);
+        
+        if (localAuth || workerAuth) {
             return interaction.editReply({
                 content: '🔓 **Already Connected**\n\nYour Spotify account is already connected! You can use all Spotify features.\n\nTo reconnect, first use `/spotify logout` and then try logging in again.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
         
@@ -222,7 +239,7 @@ async function handleLogin(interaction, userId) {
             await interaction.editReply({
                 embeds: [embed],
                 components: [row],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         } catch (error) {
             console.error('[SpotifyCommand] Failed to generate auth URL:', error.message);
@@ -242,7 +259,7 @@ async function handleLogin(interaction, userId) {
                 
             await interaction.editReply({
                 embeds: [errorEmbed],
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     } catch (error) {
@@ -251,51 +268,61 @@ async function handleLogin(interaction, userId) {
         if (!interaction.replied && !interaction.deferred) {
             await interaction.reply({
                 content: `❌ **Error:** ${error.message}`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         } else {
             await interaction.editReply({
                 content: `❌ **Error:** ${error.message}`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }
 }
 
 async function handleLogout(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         await interaction.reply({
             content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to connect one!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for detailed instructions.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
         return;
     }
 
-    const revoked = revokeUserAuth(userId);
+    // Revoke from both systems
+    const localRevoked = revokeUserAuth(userId);
+    const workerRevoked = await workerRevokeUserToken(userId);
     
-    if (revoked) {
+    if (localRevoked || workerRevoked) {
         await interaction.reply({
             content: '✅ **Disconnected Successfully**\n\nYour Spotify account has been disconnected. Use `/spotify login` to reconnect anytime!',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     } else {
         await interaction.reply({
             content: '❌ **Disconnect Failed**\n\nCould not disconnect your Spotify account. Please try again.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     }
 }
 
 async function handleStatus(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         await interaction.reply({
             content: '🔓 **Not Connected**\n\nYou don\'t have a Spotify account connected. Use `/spotify login` to get started!\n\n📖 **Setup Guide:** Visit [our guide](https://gogesmemebot.gogebot.art/spotify/guide) for detailed instructions.',
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
         return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         const playbackState = await getUserCurrentPlayback(userId);
@@ -378,14 +405,18 @@ async function handleStatus(interaction, userId) {
 }
 
 async function handleControl(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         throw new Error('User not authenticated');
     }
 
     const action = interaction.options.getString('action');
     const volume = interaction.options.getInteger('volume');
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         const params = {};
@@ -438,11 +469,15 @@ async function handleControl(interaction, userId) {
 }
 
 async function handleDevices(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         throw new Error('User not authenticated');
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         const devices = await getUserDevices(userId);
@@ -487,12 +522,16 @@ async function handleDevices(interaction, userId) {
 }
 
 async function handlePlaylists(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         throw new Error('User not authenticated');
     }
 
     const limit = interaction.options.getInteger('limit') || 10;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         const playlists = await getUserPlaylists(userId, { limit });
@@ -537,12 +576,16 @@ async function handlePlaylists(interaction, userId) {
 }
 
 async function handleQueue(interaction, userId) {
-    if (!isUserAuthenticated(userId)) {
+    // Check both authentication systems
+    const localAuth = isUserAuthenticated(userId);
+    const workerAuth = await workerIsUserAuthenticated(userId);
+    
+    if (!localAuth && !workerAuth) {
         throw new Error('User not authenticated');
     }
 
     const songInput = interaction.options.getString('song');
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
         let trackUri = null;
@@ -578,5 +621,79 @@ async function handleQueue(interaction, userId) {
         }
 
         await interaction.editReply({ content: errorMessage });
+    }
+}
+
+async function handleDebug(interaction, userId) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    
+    try {
+        // Get authentication status from both systems
+        const localAuth = isUserAuthenticated(userId);
+        const workerAuth = await workerIsUserAuthenticated(userId);
+        const localStatus = getAuthStatus(userId);
+        const workerToken = await getUserToken(userId);
+        
+        const embed = new EmbedBuilder()
+            .setColor('#1DB954')
+            .setTitle('🔍 Spotify Authentication Debug')
+            .setDescription(`Debug information for user: <@${userId}>`)
+            .addFields(
+                {
+                    name: '🤖 Local System (Bot Memory)',
+                    value: `**Authenticated:** ${localAuth ? '✅' : '❌'}\n` +
+                          `**Has Pending Auth:** ${localStatus.hasPendingAuth ? '✅' : '❌'}\n` +
+                          `**User Data:** ${localStatus.userData ? '✅' : '❌'}`,
+                    inline: true
+                },
+                {
+                    name: '☁️ Worker System (KV Store)',
+                    value: `**Authenticated:** ${workerAuth ? '✅' : '❌'}\n` +
+                          `**Token Exists:** ${workerToken ? '✅' : '❌'}\n` +
+                          `**Token Valid:** ${workerToken && workerToken.expiresAt > Date.now() ? '✅' : '❌'}`,
+                    inline: true
+                },
+                {
+                    name: '🔧 Recommendation',
+                    value: !localAuth && !workerAuth ? 
+                          '**Action:** Use `/spotify login` to authenticate' :
+                          localAuth && workerAuth ?
+                          '**Status:** ✅ Fully authenticated (both systems)' :
+                          localAuth && !workerAuth ?
+                          '**Issue:** ⚠️ Local auth only - OAuth callback may have failed' :
+                          '**Issue:** ⚠️ Worker auth only - Local session expired',
+                    inline: false
+                }
+            )
+            .setTimestamp();
+
+        if (localStatus.userData) {
+            embed.addFields({
+                name: '📊 Local Token Info',
+                value: `**Spotify User:** ${localStatus.userData.spotifyUserId}\n` +
+                      `**Display Name:** ${localStatus.userData.displayName}\n` +
+                      `**Product:** ${localStatus.userData.product}\n` +
+                      `**Expires:** <t:${Math.floor(localStatus.userData.expiresAt / 1000)}:R>`,
+                inline: false
+            });
+        }
+
+        if (workerToken) {
+            embed.addFields({
+                name: '☁️ Worker Token Info',
+                value: `**Spotify User:** ${workerToken.spotifyUserId || 'Unknown'}\n` +
+                      `**Display Name:** ${workerToken.displayName || 'Unknown'}\n` +
+                      `**Expires:** <t:${Math.floor((workerToken.expiresAt || 0) / 1000)}:R>`,
+                inline: false
+            });
+        }
+
+        await interaction.editReply({ embeds: [embed] });
+    } catch (error) {
+        console.error('Error in debug command:', error);
+        await interaction.editReply({
+            content: `❌ **Debug Error:** ${error.message}`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 } 
